@@ -1,4 +1,0 @@
-* text=auto eol=lf
-readme.md eol=crlf
-*.cmd eol=crlf
-*.bat eol=crlf
