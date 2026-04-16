@@ -1,0 +1,73 @@
+* checking system
+enabling tcp timestamps
+CYGWIN detected
+kernel: CYGWIN_NT-10.0-19043 version 3.4.10-1.x86_64 (runneradmin@fv-az1212-175) (gcc version 11.4.0 (GCC) ) 2023-11-29 12:12 UTC
+firewall type is windivert
+CURL=curl
+curl 8.10.1 (x86_64-pc-cygwin) libcurl/8.10.1 OpenSSL/3.4.0 zlib/1.3.1 zstd/1.5.5 nghttp2/1.61.0 nghttp3/1.6.0
+Release-Date: 2024-09-18
+Protocols: dict file ftp ftps gopher gophers http https imap imaps ipfs ipns mqtt pop3 pop3s rtsp smb smbs smtp smtps telnet tftp ws wss
+Features: alt-svc AsynchDNS HSTS HTTP2 HTTP3 HTTPS-proxy IPv6 Largefile libz NTLM SSL threadsafe TLS-SRP UnixSockets zstd
+* checking already running DPI bypass processes
+* checking prerequisites
+* checking DNS
+system DNS is working
+comparing system resolver to public DNS : 8.8.8.8
+pornhub.com : OK
+ntc.party : OK
+rutracker.org : OK
+www.torproject.org : OK
+bbc.com : OK
+checking resolved IP uniqueness for : pornhub.com ntc.party rutracker.org www.torproject.org bbc.com
+censor's DNS can return equal result for multiple blocked domains.
+all resolved IPs are unique
+-- DNS looks good
+-- NOTE this check is Russia targeted. In your country other domains may be blocked.
+* checking virtualization
+cannot detect
+
+NOTE ! this test should be run with zapret or any other bypass software disabled, without VPN
+
+
+* port block tests ipv4 roblox.com:443
+nc -z -w 2 128.116.31.3 443
+Connection to 128.116.31.3 443 port [tcp/https] succeeded!
+128.116.31.3 connects
+
+* curl_test_https_tls12 ipv4 roblox.com
+- checking without DPI bypass
+curl: (35) Recv failure: Connection reset by peer
+UNAVAILABLE code=35
+
+- IP block tests (requires manual interpretation)
+> testing iana.org on it's original ip
+!!!!! AVAILABLE !!!!!
+> testing roblox.com on 192.0.43.8 (iana.org)
+curl: (35) Recv failure: Connection reset by peer
+> testing iana.org on 128.116.31.3 (roblox.com)
+curl: (60) SSL: no alternative certificate subject name matches target hostname 'iana.org'
+More details here: https://curl.se/docs/sslcerts.html
+
+curl failed to verify the legitimacy of the server and therefore could not
+establish a secure connection to it. To learn more about this situation and
+how to fix it, please visit the webpage mentioned above.
+
+preparing winws redirection
+- curl_test_https_tls12 ipv4 roblox.com : winws --wf-l3=ipv4 --wf-tcp=443 --dpi-desync=multisplit --dpi-desync-split-pos=2
+curl: (28) Connection timed out after 2014 milliseconds
+UNAVAILABLE code=28
+- curl_test_https_tls12 ipv4 roblox.com : winws --wf-l3=ipv4 --wf-tcp=443 --dpi-desync=multisplit --dpi-desync-split-pos=1
+!!!!! AVAILABLE !!!!!
+
+!!!!! curl_test_https_tls12: working strategy found for ipv4 roblox.com : winws --dpi-desync=multisplit --dpi-desync-split-pos=1 !!!!!
+
+clearing winws redirection
+
+* SUMMARY
+ipv4 roblox.com curl_test_https_tls12 : winws --wf-l3=ipv4 --wf-tcp=443 --dpi-desync=multisplit --dpi-desync-split-pos=1
+
+Please note this SUMMARY does not guarantee a magic pill for you to copy/paste and be happy.
+Understanding how strategies work is very desirable.
+This knowledge allows to understand better which strategies to prefer and which to avoid if possible, how to combine strategies.
+Blockcheck does it's best to prioritize good strategies but it's not bullet-proof.
+It was designed not as magic pill maker but as a DPI bypass test tool.
