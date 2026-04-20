@@ -1,10 +1,60 @@
 #RequireAdmin
+#Region ;**** Directives created by AutoIt3Wrapper_GUI ****
+#AutoIt3Wrapper_UseX64=y
+#AutoIt3Wrapper_Res_Description=Zapret Türkiye Windows - Zapret Kullanmayı Kolaylaştıran Araç
+#AutoIt3Wrapper_Res_Fileversion=1.1.1.0
+#AutoIt3Wrapper_Res_ProductVersion=1.1.1
+#AutoIt3Wrapper_Res_LegalCopyright=Ali Mali
+#AutoIt3Wrapper_Res_Language=1055
+#EndRegion ;**** Directives created by AutoIt3Wrapper_GUI ****
+#Region ; **** Directives created by AutoIt3Wrapper_GUI ****
+#EndRegion ; **** Directives created by AutoIt3Wrapper_GUI ****
+
 #include <File.au3>
 #include <MsgBoxConstants.au3>
 #include <GUIConstantsEx.au3>
 #include <StaticConstants.au3>
 #include <WindowsConstants.au3>
 #include <ProgressConstants.au3>
+
+; --- ZIP / TEMP KLASÖRÜ KONTROLÜ ---
+Local $currentDir = @ScriptDir
+; Windows'un ZIP'leri açtığı geçici klasörleri (Temp veya Temporary Internet Files) kontrol et
+If StringInStr($currentDir, @TempDir) Or StringInStr($currentDir, "Temporary Internet Files") Or StringInStr($currentDir, "vfs") Then
+    MsgBox(16, "Hata: Arşivden Çalıştırma Saptandı", _
+            "Programı ZIP dosyasının içinden doğrudan çalıştırmayın!" & @CRLF & @CRLF & _
+            "1. ZIP dosyasındaki tüm dosyaları normal bir klasöre çıkarın." & @CRLF & _
+            "2. Ardından programı o klasörden tekrar başlatın." & @CRLF & @CRLF & _
+            "Geçici klasörlerden çalıştırıldığında sürücü izinleri alınamaz.")
+    Exit
+EndIf
+
+; --- GÜVENLİK UYARILARINI (SMARTSCREEN) KALDIR ---
+; Bu komut, programın bulunduğu klasördeki tüm dosyaların "Mark of the Web" işaretini siler.
+; Böylece bash.exe veya winws.exe çalışırken kullanıcıya uyarı çıkmaz.
+RunWait('powershell -Command "Get-ChildItem -Path ''' & @ScriptDir & ''' -Recurse | Unblock-File"', "", @SW_HIDE)
+
+
+; --- ÇAKIŞMA KONTROLÜ (GoodbyeDPI) ---
+If ProcessExists("goodbyedpi.exe") Then
+    Local $iResponse = MsgBox(52, "Çakışma Saptandı", "GoodbyeDPI aktif gözüküyor, Zapret'in çalışması için GoodbyeDPI sonlandırılmalı." & @CRLF & @CRLF & _
+            "GoodbyeDPI'ı kapatmak ve varsa servisini kaldırmak istiyor musunuz?")
+
+    If $iResponse = 6 Then ; Evet seçilirse
+        ; İşlemi sonlandır
+        ProcessClose("goodbyedpi.exe")
+        While ProcessExists("goodbyedpi.exe")
+            Sleep(100)
+        WEnd
+
+        ; Servisleri temizle
+        RunWait(@ComSpec & ' /c sc stop "GoodbyeDPI" & sc delete "GoodbyeDPI" & sc stop "WinDivert" & sc delete "WinDivert" & sc stop "WinDivert14" & sc delete "WinDivert14"', "", @SW_HIDE)
+
+        MsgBox(64, "Bilgi", "GoodbyeDPI ve servisleri başarıyla kaldırıldı. Program başlatılıyor.")
+    Else ; Hayır seçilirse
+        Exit ; Programı kapat
+    EndIf
+EndIf
 
 ; --- Tepsi Menüsü Ayarları ---
 Opt("TrayMenuMode", 3)
@@ -36,7 +86,7 @@ TraySetClick(16)
 
 ; --- Üst Durum Paneli ---
 Local $lblStatusBg = GUICtrlCreateLabel("", 15, 15, 370, 75)
-GUICtrlSetBkColor(-1, 0xF2F4F7) 
+GUICtrlSetBkColor(-1, 0xF2F4F7)
 Local $lblStatusText = GUICtrlCreateLabel("SİSTEM HAZIRLANIYOR...", 15, 30, 370, 25, $SS_CENTER)
 GUICtrlSetFont(-1, 12, 800, 0, "Segoe UI")
 GUICtrlSetColor(-1, 0xE67E22)
@@ -54,7 +104,7 @@ GUICtrlSetState(-1, $GUI_DISABLE) ; <--- KİLİTLİ BAŞLAR
 GUICtrlSetFont(-1, 11, 800, 0, "Segoe UI")
 
 Local $chkAutoHost = GUICtrlCreateCheckbox(" Otomatik Hostlist Kullanımını Aktifleştir", 75, 175, 280, 25)
-GUICtrlSetState(-1, $GUI_DISABLE) ; <--- KİLİTLİ BAŞLAR
+GUICtrlSetState(-1, BitOR($GUI_CHECKED, $GUI_DISABLE)) ; <--- Hem CHECKED hem DISABLE yapar
 GUICtrlSetFont(-1, 9, 400, 0, "Segoe UI")
 
 Local $btnAnalyze = GUICtrlCreateButton("ISS Analizi Yap", 50, 215, 300, 40)
@@ -68,7 +118,7 @@ GUICtrlSetFont(-1, 10, 600, 0, "Segoe UI")
 Local $btnRemoveService = GUICtrlCreateButton("Servis ve Kalıntıları Temizle", 50, 315, 300, 35)
 GUICtrlSetFont(-1, 10, 600, 0, "Segoe UI")
 
-Local $lblFooter = GUICtrlCreateLabel("Zapret Türkiye Windows v1.0", 0, 390, 400, 20, $SS_CENTER)
+Local $lblFooter = GUICtrlCreateLabel("Zapret Türkiye Windows v1.1.1", 0, 390, 400, 20, $SS_CENTER)
 GUICtrlSetFont(-1, 8, 400, 0, "Segoe UI")
 GUICtrlSetColor(-1, 0xBDC3C7)
 
@@ -99,46 +149,46 @@ While 1
     Local $nMsg = GUIGetMsg()
     Switch $nMsg
         Case $GUI_EVENT_CLOSE
-            ExitApp() 
-            
+            ExitApp()
+
         Case $GUI_EVENT_MINIMIZE
-            GUISetState(@SW_HIDE, $hGUI) 
+            GUISetState(@SW_HIDE, $hGUI)
             TraySetToolTip("Zapret Master Pro Çalışıyor")
-            
+
         Case $btnAnalyze
             Local $iConfirm = MsgBox(33, "Bilgi", "Analiz işlemi 5-10 dakika sürebilir." & @CRLF & "Lütfen bitene kadar bekleyin.")
             If $iConfirm = 1 Then
                 _SetButtonsState($aCriticalButtons, $GUI_DISABLE)
                 GUICtrlSetState($btnRemoveService, $GUI_DISABLE)
                 GUICtrlSetData($lblStatusText, "ANALİZ YAPILIYOR...")
-                
+
                 GUICtrlSetState($pBar, $GUI_SHOW)
                 GUICtrlSetData($lblStrategyInfo, "")
                 _SendMessage(GUICtrlGetHandle($pBar), $PBM_SETMARQUEE, True, 50)
-                
+
                 RunBlockcheck($btnAnalyze)
-                
+
                 _SendMessage(GUICtrlGetHandle($pBar), $PBM_SETMARQUEE, False, 0)
                 GUICtrlSetState($pBar, $GUI_HIDE)
-                
+
                 _SetButtonsState($aCriticalButtons, $GUI_ENABLE)
                 GUICtrlSetState($btnRemoveService, $GUI_ENABLE)
                 CheckServiceStatus($btnRunZapret, $lblStatusText, $aCriticalButtons, $chkAutoHost)
                 GUICtrlSetData($lblStatusText, "ANALİZ TAMAMLANDI")
                 GUICtrlSetData($lblStrategyInfo, "Strateji Durumu: " & (FileExists($strategyFile) ? "Mevcut" : "Mevcut Değil"))
             EndIf
-            
+
         Case $btnRunZapret
             If $isZapretRunning = False Then
                 StartWinws($btnRunZapret, $lblStatusText, $aOtherButtons)
             Else
                 StopWinws($btnRunZapret, $lblStatusText, $aOtherButtons)
             EndIf
-            
+
         Case $btnInstallService
             InstallServiceClean($chkAutoHost)
             CheckServiceStatus($btnRunZapret, $lblStatusText, $aCriticalButtons, $chkAutoHost)
-            
+
         Case $btnRemoveService
             RemoveService()
             $isPoisoned = CheckDnsPoisoningSilent()
@@ -172,23 +222,47 @@ EndFunc
 Func CheckDnsPoisoningSilent()
     Local $testDomain = "updates.discord.com"
     Local $localIP = "", $safeIP = ""
-    Local $iPidLocal = Run(@ComSpec & " /c nslookup " & $testDomain, "", @SW_HIDE, $STDOUT_CHILD)
+
+    ; 1. YEREL SORGU (PowerShell Resolve-DnsName)
+    ; -Type A: Sadece IPv4 adreslerini getirir.
+    ; -ErrorAction SilentlyContinue: Hata durumunda (internet yoksa vb.) PowerShell'in hata fışkırtmasını engeller.
+    Local $sPSCommand = 'powershell -NoProfile -Command "(Resolve-DnsName ' & $testDomain & ' -Type A -ErrorAction SilentlyContinue).IPAddress"'
+    Local $iPidLocal = Run($sPSCommand, "", @SW_HIDE, $STDOUT_CHILD)
     ProcessWaitClose($iPidLocal)
-    Local $sLocalOut = StdoutRead($iPidLocal)
-    Local $aLocalMatches = StringRegExp($sLocalOut, "Address:\s+(\d+\.\d+\.\d+\.\d+)", 3)
-    If UBound($aLocalMatches) > 0 Then $localIP = $aLocalMatches[UBound($aLocalMatches)-1]
+    Local $sLocalOut = StringStripWS(StdoutRead($iPidLocal), 3) ; Boşlukları ve yeni satırları temizle
+
+    ; Eğer birden fazla IP dönerse (Discord genelde liste döner), ilkini alalım
+    If $sLocalOut <> "" Then
+        Local $aIPs = StringSplit($sLocalOut, @CRLF, 1)
+        $localIP = $aIPs[1]
+    EndIf
+
+    ; 2. GÜVENLİ SORGU (Cloudflare DoH üzerinden gerçek IP)
     Local $oHTTP = ObjCreate("winhttp.winhttprequest.5.1")
     $oHTTP.Open("GET", "https://1.1.1.1/dns-query?name=" & $testDomain & "&type=A", False)
     $oHTTP.SetRequestHeader("Accept", "application/dns-json")
     $oHTTP.Send()
     If $oHTTP.Status = 200 Then
+        ; JSON içindeki "data":"..." kısmından IP'yi çeker
         Local $aSafeMatches = StringRegExp($oHTTP.ResponseText, 'data":"(\d+\.\d+\.\d+\.\d+)"', 3)
         If UBound($aSafeMatches) > 0 Then $safeIP = $aSafeMatches[0]
     EndIf
-    If $localIP <> "" And $safeIP <> "" Then
-        If StringLeft($localIP, 6) <> StringLeft($safeIP, 6) Then Return True
+
+    ; --- KARŞILAŞTIRMA VE HATA KONTROLÜ ---
+
+    ; Yerel IP hiç alınamadıysa (DNS cevap vermiyor veya engelli), bunu sorun kabul edelim.
+    If $localIP = "" Then Return True
+
+    ; IP'lerin ilk iki bloğunu (Oktet) karşılaştır (Örn: 162.159)
+    ; Bu yöntem IP son hanesi değişse bile doğru sonucu verir.
+    Local $localPrefix = StringRegExpReplace($localIP, "^(\d+\.\d+).*", "$1")
+    Local $safePrefix = StringRegExpReplace($safeIP, "^(\d+\.\d+).*", "$1")
+
+    If $localPrefix <> $safePrefix Then
+        Return True ; Zehirlenme (Poisoning) var!
+    Else
+        Return False ; Her şey temiz.
     EndIf
-    Return False
 EndFunc
 
 Func CheckServiceStatus($manualBtn, $statusID, $lockArray, $chkID)
@@ -265,7 +339,7 @@ Func RunBlockcheck($ctrlID)
     Local $hTimer = TimerInit()
     Do
         Sleep(100)
-        If WinExists("[Class:ConsoleWindowClass]") Then 
+        If WinExists("[Class:ConsoleWindowClass]") Then
             WinSetState("[Class:ConsoleWindowClass]", "", @SW_HIDE)
         EndIf
     Until (Not ProcessExists("bash.exe")) And (TimerDiff($hTimer) > 10000)
@@ -287,11 +361,11 @@ Func ExtractSummary($filePath)
             EndIf
         EndIf
     Next
-    
+
     ; --- DÜZELTME BURADA ---
     If $found And $strategy <> "" Then
         ; Dosyayı mod 2 (overwrite) ile açıp yazıyoruz, böylece eski veri siliniyor
-        Local $hFile = FileOpen($strategyFile, 2) 
+        Local $hFile = FileOpen($strategyFile, 2)
         If $hFile <> -1 Then
             FileWrite($hFile, $strategy)
             FileClose($hFile)
