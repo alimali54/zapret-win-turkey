@@ -19,6 +19,11 @@ Bu programın amacı, Türk kullanıcılar için DPI (Deep Packet Inspection / D
 
 ## Yerel Ağ Paylaşımı (Konsol / Diğer Cihazlar) Kurulumu
 
+> [!CAUTION]
+> Wi-Fi ile kullanırsa önemli ölçüde hız düşüşü yaşanabilir.
+> 
+> Hız düşüşü yaşarsanız bilgisayarı modem/router'a kablo ile bağlayın. 
+
 "Ağdaki Cihazlarla Paylaş" özelliğini kullanabilmek için bilgisayarınızda **[Npcap](https://npcap.com/)** sürücüsünün kurulu olması gerekmektedir. 
 
 Özelliği aktifleştirdikten sonra, ağdaki diğer cihazınızın (Örn: PlayStation/Xbox) **Manuel Ağ Ayarları** kısmına girerek aşağıdaki yapılandırmayı uygulamanız yeterlidir:
