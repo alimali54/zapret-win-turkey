@@ -20,7 +20,7 @@ Bu programın amacı, Türk kullanıcılar için DPI (Deep Packet Inspection / D
 ## Yerel Ağ Paylaşımı (Konsol / Diğer Cihazlar) Kurulumu
 
 > [!CAUTION]
-> Wi-Fi ile kullanırsa önemli ölçüde hız düşüşü yaşanabilir.
+> Bu özellik Wi-Fi ile kullanırsa önemli ölçüde hız düşüşü yaşanabilir.
 > 
 > Hız düşüşü yaşarsanız bilgisayarı modem/router'a kablo ile bağlayın. 
 
