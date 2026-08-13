@@ -1,5 +1,4 @@
-<img width="402" height="567" alt="image" src="https://github.com/user-attachments/assets/5c50ee40-ce9e-4ddd-9a08-31bf943cd75c" />
-
+<img width="402" height="562" alt="image" src="https://github.com/user-attachments/assets/f12462b9-3341-44be-8560-fe1d0e830e35" />
 
 # Zapret Windows Türkiye
 
