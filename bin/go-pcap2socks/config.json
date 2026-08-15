@@ -1,0 +1,34 @@
+{
+  "pcap": {
+    "network": "172.24.0.0/16",
+    "localIP": "172.24.2.1"
+  },
+  "dns": {
+    "servers": [
+      {
+        "address": "local"
+      }
+    ]
+  },
+  "routing": {
+    "rules": [
+      {
+        "dstPort": "53",
+        "outboundTag": "dns-out"
+      }
+    ]
+  },
+  "outbounds": [
+    {
+      "tag": "",
+      "direct": {}
+    },
+    {
+      "tag": "dns-out",
+      "dns": {}
+    }
+  ],
+  "capture": {
+    "enabled": false
+  }
+}

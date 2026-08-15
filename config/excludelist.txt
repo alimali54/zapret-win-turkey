@@ -1,0 +1,4 @@
+com.tr
+gov.tr
+google.com
+googleapis.com
