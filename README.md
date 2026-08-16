@@ -41,4 +41,5 @@ Program, arka planda çalışabilecek diğer DPI atlatma araçlarıyla (`Goodbye
 
 - **Zapret** projesinin ana motoru için [@bol-van](https://github.com/bol-van)'a,
 - Otomatik blockcheck mantığı ve ilhamı için [splitwire-turkey](https://github.com/cagritaskn/splitwire-turkey) geliştiricisi [@cagritaskn](https://github.com/cagritaskn)'a,
-- [go-pcap2socks](https://github.com/DaniilSokolyuk/go-pcap2socks) projesinin geliştiricisi [@DaniilSokolyuk](https://github.com/DaniilSokolyuk)'a teşekkür ederiz.
+- [go-pcap2socks](https://github.com/DaniilSokolyuk/go-pcap2socks) projesinin geliştiricisi [@DaniilSokolyuk](https://github.com/DaniilSokolyuk)'a, 
+- [dnscrypt-proxy](https://github.com/dnscrypt/dnscrypt-proxy) projesinin geliştiricisi [@jedisct1](https://github.com/jedisct1)'e teşekkürler. 
