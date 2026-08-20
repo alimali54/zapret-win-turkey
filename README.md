@@ -7,6 +7,7 @@ Bu programın amacı, Türk kullanıcılar için DPI (Deep Packet Inspection / D
 ## Programın Özellikleri
 
 - **DNS Kontrolü:** ISS tarafından DNS'inize müdahale ediliyorsa tespiti yapılır. DNS'i sağlama almak için YogaDNS kurmanızı ve Google DoH ayarlamanızı öneririm.
+- **Dnscrypt-proxy servisi:** YogaDNS kullanmanızı daha çok tavsiye etsem de Dnscrypt-proxy kullanarak da şifreli DNS servisi kullanabilirsiniz. Her şey tek programda olsun diyenler tercih edebilir. 
 - **Blockcheck:** ISS'niz için çalışan stratejiyi bulmak için blockcheck yapabilirsiniz.
 - **Hazır Stratejiler:** Bulabildiğim bazı hazır stratejileri programa ekledim, blockcheck yapmaya gerek kalmadan deneyebilirsiniz.
 - **Çoklu Motor Desteği (Multi-Engine):** Hem eski klasik Zapret motorunu hem de yeni nesil LUA tabanlı gelişmiş Zapret2 motorunu entegre olarak barındırır.
