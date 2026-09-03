@@ -3,8 +3,8 @@
 #AutoIt3Wrapper_Icon=bin\zapret\zapret-winws\winws2.ico
 #AutoIt3Wrapper_UseX64=y
 #AutoIt3Wrapper_Res_Description=Zapret Multi-Engine Windows Türkiye - Zapret & Zapret2 Kontrol Aracı
-#AutoIt3Wrapper_Res_Fileversion=3.9.0.0
-#AutoIt3Wrapper_Res_ProductVersion=3.9
+#AutoIt3Wrapper_Res_Fileversion=4.2.0.0
+#AutoIt3Wrapper_Res_ProductVersion=4.2
 #AutoIt3Wrapper_Res_LegalCopyright=Ali Mali
 #AutoIt3Wrapper_Res_Language=1055
 #EndRegion ;**** Directives created by AutoIt3Wrapper_GUI ****
@@ -75,9 +75,10 @@ Global $currentEngine = "Zapret2"
 Global $isZapretRunning = False
 Global $zapretPID = 0
 Global $pcapPID = 0
+Global $bServiceStoppedWarned = False
 
 ; --- GUI Tasarımı ---
-Local $hGUI = GUICreate("Zapret Windows Türkiye v4.0", 400, 535)
+Local $hGUI = GUICreate("Zapret Windows Türkiye v4.2", 400, 535)
 GUISetBkColor(0xFFFFFF)
 
 ; --- Tepsi Menüsü ---
@@ -273,6 +274,13 @@ While 1
 				MsgBox(16 + 8192, "Uyarı: Zapret Kapatıldı", "Zapret motoru beklenmedik bir şekilde çöktü veya dışarıdan sonlandırıldı!" & @CRLF & @CRLF & _
                     "Sisteminizdeki Anti-Cheat yazılımları Zapret'i tehdit olarak algılayıp kapatmış olabilir.")
 			EndIf
+
+			; 4. YENİ: Zapret ölmüşse VE arayüz hala "SERVİS MODU AKTİF" diyorsa (Servis Modu Çökme durumu)
+			If GUICtrlRead($lblStatusText) = "SERVİS MODU AKTİF" Then
+				; Sistemi kontrol fonksiyonuna yolla, o zaten "DURDU" yazdırıp ortak uyarıyı verecek!
+				CheckServiceStatus($btnRunZapret, $lblStatusText, $aCriticalButtons, $cmbFilter)
+			EndIf
+
 		EndIf
 	$hProcessTimer = TimerInit()
 	EndIf
@@ -424,60 +432,42 @@ While 1
             If StringInStr($btnText, "servisi kur") Then
                 GUICtrlSetData($lblStatusText, "DNSCRYPT KURULUYOR...")
 
-                ; Servisi kur ve başlat
                 RunWait('"' & $sProxyPath & '" -service install', $sProxyDir, @SW_HIDE)
                 RunWait('"' & $sProxyPath & '" -service start', $sProxyDir, @SW_HIDE)
-
-                ; DNS'i Localhost (127.0.0.1 ve ::1) yap
                 _SetDNS_Localhost()
 
                 GUICtrlSetData($btnDnscrypt, "[ ✓ ] Dnscrypt-proxy Aktif / Kaldır")
-
-                ; --- YENİ EKLENEN RE-CHECK KISMI ---
-                GUICtrlSetData($lblStatusText, "DNS TEST EDİLİYOR...")
-                Sleep(1000) ; Ağın kendine gelmesi için kısa bir bekleme
-
-                Local $isPoisonedAfter = CheckDnsPoisoningSilent()
-                If Not $isPoisonedAfter Then
-                    CheckServiceStatus($btnRunZapret, $lblStatusText, $aCriticalButtons, $cmbFilter)
-                    GUICtrlSetState($btnDnscrypt, $GUI_ENABLE) ; Butonu her zaman açık tut
-                    ;MsgBox(64 + 8192, "Başarılı", "DNSCrypt servisi kuruldu, DNS zehirlenmesi aşıldı ve sistem hazır!")
-                Else
-                    GUICtrlSetData($lblStatusText, "DNS KORUMASI AKTİF")
-                    GUICtrlSetState($btnDnscrypt, $GUI_ENABLE)
-                    MsgBox(64 + 8192, "Başarılı", "DNSCrypt servisi kuruldu.")
-                EndIf
-				IniWrite($iniPath, "Settings", "DnscryptInstalled", "1")
+                IniWrite($iniPath, "Settings", "DnscryptInstalled", "1")
+                ;MsgBox(64 + 8192, "Başarılı", "DNSCrypt servisi kuruldu.")
             Else
                 GUICtrlSetData($lblStatusText, "DNSCRYPT KALDIRILIYOR...")
 
-                ; Servisi durdur ve kaldır
                 RunWait('"' & $sProxyPath & '" -service stop', $sProxyDir, @SW_HIDE)
                 RunWait('"' & $sProxyPath & '" -service uninstall', $sProxyDir, @SW_HIDE)
-
-                ; DNS'i DHCP'ye al
                 _ResetSystemDNS()
 
                 GUICtrlSetData($btnDnscrypt, "Dnscrypt-proxy servisi kur")
-
-                ; --- YENİ EKLENEN RE-CHECK KISMI ---
-                GUICtrlSetData($lblStatusText, "DNS TEST EDİLİYOR...")
-                Sleep(1000)
-
-                Local $isPoisonedAfterRemoval = CheckDnsPoisoningSilent()
-                If $isPoisonedAfterRemoval Then
-                    _SetButtonsState($aCriticalButtons, $GUI_DISABLE)
-                    GUICtrlSetState($btnDnscrypt, $GUI_ENABLE) ; Bu buton hep serbest kalacak
-                    GUICtrlSetData($lblStatusText, "DNS ZEHİRLENMESİ SAPTANDI!")
-                    GUICtrlSetColor($lblStatusText, 0xC0392B)
-                Else
-                    CheckServiceStatus($btnRunZapret, $lblStatusText, $aCriticalButtons, $cmbFilter)
-                    GUICtrlSetState($btnDnscrypt, $GUI_ENABLE)
-                EndIf
-
-                MsgBox(64 + 8192, "Bilgi", "DNSCrypt servisi kaldırıldı ve DNS otomatiğe (DHCP) alındı.")
-				IniWrite($iniPath, "Settings", "DnscryptInstalled", "0")
+                IniWrite($iniPath, "Settings", "DnscryptInstalled", "0")
+                ;MsgBox(64 + 8192, "Bilgi", "DNSCrypt servisi kaldırıldı ve DNS otomatiğe (DHCP) alındı.")
             EndIf
+
+            ; --- AÇILIŞTAKİ GÜVENLİ KONTROL AKIŞININ AYNISI (BAŞTAN AÇILMIŞ GİBİ) ---
+            GUICtrlSetData($lblStatusText, "DNS TEST EDİLİYOR...")
+            Sleep(1000) ; Ağın ve adaptörün kendine gelmesi için bekleme
+
+			Local $isPoisoned = CheckDnsPoisoningSilent()
+
+            If $isPoisoned Then
+				_SetButtonsState($aCriticalButtons, $GUI_DISABLE)
+				GUICtrlSetState($btnDnscrypt, $GUI_ENABLE) ; DNS zehirlense bile bu buton hep tıklanabilir olsun
+				GUICtrlSetData($lblStatusText, "DNS ZEHİRLENMESİ SAPTANDI!")
+				GUICtrlSetColor($lblStatusText, 0xC0392B)
+			Else
+				; Zehirlenme yoksa her şey normal devam etsin
+				CheckServiceStatus($btnRunZapret, $lblStatusText, $aCriticalButtons, $cmbFilter)
+				GUICtrlSetState($btnDnscrypt, $GUI_ENABLE)
+				_RefreshStrategyLabel()
+			EndIf
 
 		Case $btnRemoveService
             RemoveService()
@@ -518,7 +508,7 @@ WEnd
 
 Func _SetSystemDNS()
     ; Aktif adaptörü bul, DNS'i düz Cloudflare yap ve önbelleği sıfırla
-    Local $psScript = "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -First 1; " & _
+    Local $psScript = "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up' -and $_.InterfaceDescription -notlike '*Virtual*' -and $_.InterfaceDescription -notlike '*Hyper-V*' -and $_.InterfaceDescription -notlike '*WSL*' -and $_.Name -notlike '*vEthernet*' -and $_.InterfaceDescription -notlike '*TAP*' -and $_.InterfaceDescription -notlike '*TUN*' -and $_.InterfaceDescription -notlike '*VPN*'} | Select-Object -First 1; " & _
                       "Set-DnsClientServerAddress -InterfaceAlias $adapter.Name -ServerAddresses '1.1.1.1', '1.0.0.1'; " & _
                       "ipconfig /flushdns;"
 
@@ -528,7 +518,7 @@ EndFunc
 Func _ResetSystemDNS()
 
     ; Aktif ağ bağdaştırıcısını bul
-    Local $psScript = "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -First 1; "
+    Local $psScript = "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up' -and $_.InterfaceDescription -notlike '*Virtual*' -and $_.InterfaceDescription -notlike '*Hyper-V*' -and $_.InterfaceDescription -notlike '*WSL*' -and $_.Name -notlike '*vEthernet*' -and $_.InterfaceDescription -notlike '*TAP*' -and $_.InterfaceDescription -notlike '*TUN*' -and $_.InterfaceDescription -notlike '*VPN*'} | Select-Object -First 1; "
 
     ; Her iki sistem için: DNS'i otomatiğe (DHCP) al ve DNS önbelleğini sıfırla
     $psScript &= "Set-DnsClientServerAddress -InterfaceAlias $adapter.Name -ResetServerAddresses; " & _
@@ -541,9 +531,9 @@ EndFunc
 Func _LoadStrategyList($sDefaultToSelect)
     GUICtrlSetData($cmbStrategy, "")
     If $currentEngine == "Zapret2" Then
-        GUICtrlSetData($cmbStrategy, "Analiz Sonucu|Turk Telekom|Superonline|Vodafone|Telekom Mobil", $sDefaultToSelect)
+        GUICtrlSetData($cmbStrategy, "Analiz Sonucu|Turk Telekom|Superonline|Vodafone|Turksat Kablonet|Telekom Mobil|Turkcell Mobil|Vodafone Mobil", $sDefaultToSelect)
     Else
-        GUICtrlSetData($cmbStrategy, "Analiz Sonucu|Turk Telekom|TT Alternatif|Superonline|SOL Alternatif|Turkcell Mobil|Vodafone Mobil|Telekom Mobil", $sDefaultToSelect)
+        GUICtrlSetData($cmbStrategy, "Analiz Sonucu|Turk Telekom|TT Alternatif|Superonline|SOL Alternatif|Vodafone|Turkcell Mobil|Vodafone Mobil|Telekom Mobil", $sDefaultToSelect)
     EndIf
 EndFunc
 
@@ -561,8 +551,14 @@ Func _GetActiveStrategyString()
                 Return "--payload=tls_client_hello --lua-desync=multidisorder:pos=2:seqovl=1"
             Case "Vodafone"
                 Return '--payload=tls_client_hello --lua-desync=multisplit:blob=fake_default_tls:ip_ttl=5:pos=2:nodrop:repeats=1'
+			Case "Turksat Kablonet"
+                Return "--payload=tls_client_hello --lua-desync=multidisorder:pos=2:seqovl=1"
 			Case "Telekom Mobil"
                 Return '--payload=tls_client_hello --lua-desync=fake:blob=0x00000000:ip_ttl=5:repeats=1'
+			Case "Turkcell Mobil"
+                Return "--payload=tls_client_hello --lua-desync=multidisorder:pos=2:seqovl=1"
+			Case "Vodafone Mobil"
+                Return "--payload=tls_client_hello --lua-desync=multidisorder:pos=2:seqovl=1"
 			EndSwitch
     Else
         Switch $sel
@@ -574,6 +570,8 @@ Func _GetActiveStrategyString()
                 Return "--dpi-desync=fake --dpi-desync-fooling=md5sig"
             Case "SOL Alternatif"
                 Return "--dpi-desync=fake --dpi-desync-fooling=md5sig --dpi-desync-ttl=3"
+			Case "Vodafone"
+                Return "--dpi-desync=fake,multisplit --dpi-desync-fooling=badseq --dpi-desync-split-pos=1,midsld"
             Case "Turkcell Mobil"
                 Return "--dpi-desync=fake --dpi-desync-ttl=1 --dpi-desync-autottl=3"
             Case "Vodafone Mobil"
@@ -700,6 +698,7 @@ Func CheckServiceStatus($manualBtn, $statusID, $lockArray, $chkID)
     Local $iPid = Run(@ComSpec & " /c sc query " & $serviceName, "", @SW_HIDE, $STDOUT_CHILD)
     ProcessWaitClose($iPid)
     Local $sOutput = StdoutRead($iPid)
+
     If StringInStr($sOutput, "SERVICE_NAME") Then
         Local $iPidCfg = Run(@ComSpec & " /c sc qc " & $serviceName, "", @SW_HIDE, $STDOUT_CHILD)
         ProcessWaitClose($iPidCfg)
@@ -716,13 +715,28 @@ Func CheckServiceStatus($manualBtn, $statusID, $lockArray, $chkID)
 
         GUICtrlSetState($manualBtn, $GUI_DISABLE)
         _SetButtonsState($lockArray, $GUI_DISABLE)
-        GUICtrlSetData($statusID, "SERVİS MODU AKTİF")
-        GUICtrlSetColor($statusID, 0x27AE60)
+
+		GUICtrlSetState($btnDnscrypt, $GUI_ENABLE)
+
+        ; --- YENİ EKLENEN KISIM: SERVİS DURUMUNU (RUNNING/STOPPED) KONTROL ET ---
+        If StringInStr($sOutput, "RUNNING") Then
+            GUICtrlSetData($statusID, "SERVİS MODU AKTİF")
+            GUICtrlSetColor($statusID, 0x27AE60)
+        Else
+            ; Servis yüklü ama durmuş!
+            GUICtrlSetData($statusID, "SERVİS YÜKLÜ - DURDU")
+            GUICtrlSetColor($statusID, 0xC0392B) ; Kırmızı renkle uyar
+
+            ; Kullanıcıyı yalnızca bir kez uyar (sürekli MsgBox çıkıp darlamasın)
+            If Not $bServiceStoppedWarned Then
+                $bServiceStoppedWarned = True
+                MsgBox(16 + 8192, "Uyarı: Servis Durdurulmuş", "Zapret servisi sisteme yüklü ancak şu anda DURMUŞ durumda!" & @CRLF & @CRLF & _
+                        "Sisteminizdeki Anti-Cheat yazılımları Zapret'i tehdit olarak algılayıp kapatmış olabilir.")
+            EndIf
+        EndIf
     Else
         GUICtrlSetState($manualBtn, $GUI_ENABLE)
         _SetButtonsState($lockArray, $GUI_ENABLE)
-
-        ;GUICtrlSetState($btnLanShare, $GUI_ENABLE)
 
         GUICtrlSetData($statusID, "SİSTEM HAZIR")
         GUICtrlSetColor($statusID, 0x2C3E50)
@@ -767,7 +781,7 @@ Func StartWinws($ctrlID, $statusID, $aBtns)
         _SetButtonsState($aBtns, $GUI_DISABLE)
 
         ; --- 2. ARKA PLANDA 1 SANİYE BEKLE VE KONTROL ET ---
-        Sleep(1000)
+        Sleep(500)
 
         If Not ProcessExists($zapretPID) Then
             ; --- 3. EĞER EXE ÇÖKTÜYSE HER ŞEYİ ESKİ HALİNE (SİSTEM HAZIR) DÖNDÜR ---
@@ -779,9 +793,7 @@ Func StartWinws($ctrlID, $statusID, $aBtns)
             CheckServiceStatus($ctrlID, $statusID, $aBtns, $cmbFilter)
 
             MsgBox(16 + 8192, "Başlatma Hatası", "Zapret motoru başlatılamadı veya anında çöktü!" & @CRLF & @CRLF & _
-                    "Olası Sebepler:" & @CRLF & _
-                    "1. Strateji parametrelerinde veya dosya yollarında bir hata olabilir." & @CRLF & _
-                    "2. Sisteminizdeki Anti-Cheat yazılımları engelliyor olabilir. Lütfen bu yazılımları kapatıp tekrar deneyin.")
+                    "Sisteminizdeki Anti-Cheat yazılımları Zapret'i tehdit olarak algılayıp kapatmış olabilir.")
         EndIf
     Else
         MsgBox(16 + 8192, "Dosya Bulunamadı", "WinWS exe dosyası bulunamadı veya çalıştırılamadı!")
@@ -1009,7 +1021,7 @@ Func HasFirewallRule($fullPath)
 EndFunc
 
 Func _SetDNS_Localhost()
-    Local $psScript = "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -First 1; "
+    Local $psScript = "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up' -and $_.InterfaceDescription -notlike '*Virtual*' -and $_.InterfaceDescription -notlike '*Hyper-V*' -and $_.InterfaceDescription -notlike '*WSL*' -and $_.Name -notlike '*vEthernet*' -and $_.InterfaceDescription -notlike '*TAP*' -and $_.InterfaceDescription -notlike '*TUN*' -and $_.InterfaceDescription -notlike '*VPN*'} | Select-Object -First 1; "
     $psScript &= "Set-DnsClientServerAddress -InterfaceAlias $adapter.Name -ServerAddresses '127.0.0.1', '::1'; "
     $psScript &= "ipconfig /flushdns;"
 
@@ -1025,7 +1037,7 @@ Func _CheckDnscryptStatus()
     Local $sOutput = StdoutRead($iPid)
 
     ; 2. Aktif DNS adresi 127.0.0.1 mi kontrol et
-    Local $psScript = "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -First 1; "
+    Local $psScript = "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up' -and $_.InterfaceDescription -notlike '*Virtual*' -and $_.InterfaceDescription -notlike '*Hyper-V*' -and $_.InterfaceDescription -notlike '*WSL*' -and $_.Name -notlike '*vEthernet*' -and $_.InterfaceDescription -notlike '*TAP*' -and $_.InterfaceDescription -notlike '*TUN*' -and $_.InterfaceDescription -notlike '*VPN*'} | Select-Object -First 1; "
     $psScript &= "if ($adapter) { (Get-DnsClientServerAddress -InterfaceAlias $adapter.Name).ServerAddresses -join ',' }"
     Local $iPidDNS = Run('powershell -NoProfile -Command "' & $psScript & '"', "", @SW_HIDE, $STDOUT_CHILD)
     ProcessWaitClose($iPidDNS)
