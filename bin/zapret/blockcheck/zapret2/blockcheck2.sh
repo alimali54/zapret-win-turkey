@@ -58,7 +58,7 @@ IPT_IN_CHAIN=blockcheck_input_$$
 IPT_COMMENT="-m comment --comment blockcheck_$$"
 
 DNSCHECK_DNS=${DNSCHECK_DNS:-8.8.8.8 1.1.1.1 77.88.8.1}
-DNSCHECK_DOM=${DNSCHECK_DOM:-pornhub.com ej.ru rutracker.org www.torproject.org bbc.com}
+DNSCHECK_DOM=${DNSCHECK_DOM:-roblox.com ej.ru rutracker.org www.torproject.org bbc.com}
 DOH_SERVERS=${DOH_SERVERS:-"https://cloudflare-dns.com/dns-query https://dns.google/dns-query https://dns.quad9.net/dns-query https://dns.adguard.com/dns-query https://common.dot.dns.yandex.net/dns-query"}
 DNSCHECK_DIG1=/tmp/dig1.txt
 DNSCHECK_DIG2=/tmp/dig2.txt
