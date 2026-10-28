@@ -1,10 +1,10 @@
-﻿#RequireAdmin
+#RequireAdmin
 #Region ;**** Directives created by AutoIt3Wrapper_GUI ****
 #AutoIt3Wrapper_Icon=bin\zapret\zapret-winws\winws2.ico
 #AutoIt3Wrapper_UseX64=y
 #AutoIt3Wrapper_Res_Description=Zapret Windows Türkiye Lite
-#AutoIt3Wrapper_Res_Fileversion=4.5.0.0
-#AutoIt3Wrapper_Res_ProductVersion=4.5
+#AutoIt3Wrapper_Res_Fileversion=4.7.0.0
+#AutoIt3Wrapper_Res_ProductVersion=4.7
 #AutoIt3Wrapper_Res_LegalCopyright=Ali Mali
 #AutoIt3Wrapper_Res_Language=1055
 #EndRegion ;**** Directives created by AutoIt3Wrapper_GUI ****
@@ -16,6 +16,7 @@
 #include <TrayConstants.au3>
 #include <ComboConstants.au3>
 #include <AutoItConstants.au3>
+#include <Constants.au3>
 
 Global Const $PBS_MARQUEE = 0x08
 
@@ -65,6 +66,7 @@ Local $iniStrategy = IniRead($iniPath, "Settings", "ActiveStrategy", "Turk Telek
 Local $iniFilterMode = IniRead($iniPath, "Settings", "FilterMode", "1")
 
 ; --- DİNAMİK MOTOR DEĞİŞKENLERİ ---
+Global $strategyFile = ""
 Global $winwsPath = ""
 Global $currentEngine = "Zapret2"
 
@@ -79,7 +81,7 @@ Global $hInstallServiceUnlockTimer = 0
 Global $bInstallServiceEnableAfterLock = True
 
 ; --- GUI Tasarımı ---
-Global $hGUI = GUICreate("Zapret Windows Türkiye v4.5 Lite", 400, 405)
+Global $hGUI = GUICreate("Zapret Windows Türkiye v4.7 Lite", 400, 396)
 GUISetBkColor(0xFFFFFF)
 
 ; --- Tepsi Menüsü ---
@@ -113,9 +115,9 @@ GUICtrlSetState(-1, $GUI_DISABLE)
 GUICtrlSetFont(-1, 11, 800, 0, "Segoe UI")
 
 ; MOTOR
-GUICtrlCreateLabel("Motor:", 50, 177, 120, 20)
+GUICtrlCreateLabel("Motor:", 50, 168, 120, 20)
 GUICtrlSetFont(-1, 9, 600, 0, "Segoe UI")
-Local $cmbEngine = GUICtrlCreateCombo("Zapret2 (Yeni LUA Motoru)", 175, 174, 175, 25, $CBS_DROPDOWNLIST)
+Local $cmbEngine = GUICtrlCreateCombo("Zapret2 (Yeni LUA Motoru)", 175, 165, 175, 25, $CBS_DROPDOWNLIST)
 GUICtrlSetData(-1, "Zapret (Eski Klasik Motor)")
 If $iniEngine == "1" Then GUICtrlSetData($cmbEngine, "Zapret (Eski Klasik Motor)", "Zapret (Eski Klasik Motor)")
 GUICtrlSetFont(-1, 9, 400, 0, "Segoe UI")
@@ -124,14 +126,14 @@ GUICtrlSetState(-1, $GUI_DISABLE)
 ; STRATEJİ
 GUICtrlCreateLabel("Strateji:", 50, 212, 120, 20)
 GUICtrlSetFont(-1, 9, 600, 0, "Segoe UI")
-Global $cmbStrategy = GUICtrlCreateCombo("Turk Telekom", 175, 209, 175, 25, $CBS_DROPDOWNLIST)
+Global $cmbStrategy = GUICtrlCreateCombo("Turk Telekom", 175, 200, 175, 25, $CBS_DROPDOWNLIST)
 GUICtrlSetFont(-1, 9, 400, 0, "Segoe UI")
 GUICtrlSetState(-1, $GUI_DISABLE)
 
 ; FİLTRE
 GUICtrlCreateLabel("Filtre:", 50, 247, 120, 20)
 GUICtrlSetFont(-1, 9, 600, 0, "Segoe UI")
-Global $cmbFilter = GUICtrlCreateCombo("Kapalı (Tüm trafik)", 175, 244, 175, 25, $CBS_DROPDOWNLIST)
+Global $cmbFilter = GUICtrlCreateCombo("Kapalı (Tüm trafik)", 175, 235, 175, 25, $CBS_DROPDOWNLIST)
 Global $sFilterSelectionBeforeOOB = ""
 Global $bFilterWasEnabledBeforeOOB = False
 Global $bOOBFilterLock = False
@@ -153,14 +155,14 @@ GUICtrlSetState(-1, $GUI_DISABLE)
 ; =========================================================================
 ; --- LITE SÜRÜMÜNÜN TEMEL İŞLEMLERİ ---
 ; =========================================================================
-Local $btnInstallService = GUICtrlCreateButton("Servis Olarak Yükle (Otomatik Başlat)", 50, 290, 300, 35)
+Local $btnInstallService = GUICtrlCreateButton("Servis Olarak Yükle (Otomatik Başlat)", 50, 281, 300, 35)
 GUICtrlSetState(-1, $GUI_DISABLE)
 GUICtrlSetFont(-1, 10, 600, 0, "Segoe UI")
 
-Local $btnRemoveService = GUICtrlCreateButton("Servis ve Kalıntıları Temizle", 50, 335, 300, 35)
+Local $btnRemoveService = GUICtrlCreateButton("Servis ve Kalıntıları Temizle", 50, 326, 300, 35)
 GUICtrlSetFont(-1, 10, 600, 0, "Segoe UI")
 
-Global $lblFooter = GUICtrlCreateLabel("Zapret Windows Türkiye Lite", 0, 380, 400, 20, $SS_CENTER)
+Global $lblFooter = GUICtrlCreateLabel("Zapret Windows Türkiye Lite", 0, 371, 400, 20, $SS_CENTER)
 GUICtrlSetFont(-1, 10, 400, 0, "Consolas")
 GUICtrlSetColor(-1, 0xBDC3C7)
 
@@ -348,14 +350,18 @@ EndFunc
 Func _LoadStrategyList($sDefaultToSelect)
     GUICtrlSetData($cmbStrategy, "")
     If $currentEngine == "Zapret2" Then
-        GUICtrlSetData($cmbStrategy, "Turk Telekom|Superonline|Vodafone|Turksat Kablonet|Telekom Mobil|Turkcell Mobil|Vodafone Mobil", ($sDefaultToSelect = "Analiz Sonucu") ? "Turk Telekom" : $sDefaultToSelect)
+        GUICtrlSetData($cmbStrategy, "Turk Telekom|Superonline|Vodafone|Turksat Kablonet|Telekom Mobil|Turkcell Mobil|Vodafone Mobil|Benim Stratejim", $sDefaultToSelect)
     Else
-        GUICtrlSetData($cmbStrategy, "Turk Telekom|TT Alternatif|Superonline|SOL Alternatif|Vodafone|Turkcell Mobil|Vodafone Mobil|Telekom Mobil", ($sDefaultToSelect = "Analiz Sonucu") ? "Turk Telekom" : $sDefaultToSelect)
+        GUICtrlSetData($cmbStrategy, "Turk Telekom|TT Alternatif|Superonline|SOL Alternatif|Vodafone|Turkcell Mobil|Vodafone Mobil|Telekom Mobil|Benim Stratejim", $sDefaultToSelect)
     EndIf
 EndFunc
 
 Func _GetActiveStrategyString()
     Local $sel = GUICtrlRead($cmbStrategy)
+    If $sel == "Benim Stratejim" Then
+        Return StringStripWS(FileRead($strategyFile), 3)
+    EndIf
+
     If $currentEngine == "Zapret2" Then
         Switch $sel
             Case "Turk Telekom"
@@ -420,7 +426,17 @@ EndFunc
 
 Func _RefreshStrategyLabel()
     Local $sel = GUICtrlRead($cmbStrategy)
-    GUICtrlSetData($lblStrategyInfo, "Strateji Durumu: Hazır Profil (" & $sel & ")")
+    If $sel == "Benim Stratejim" Then
+        GUICtrlSetData($lblStrategyInfo, "Strateji Durumu: " & (HasValidStrategy() ? "Mevcut" : "Mevcut Değil"))
+    Else
+        GUICtrlSetData($lblStrategyInfo, "Strateji Durumu: Hazır Profil (" & $sel & ")")
+    EndIf
+EndFunc
+
+Func HasValidStrategy()
+    If Not FileExists($strategyFile) Then Return False
+    Local $sContent = StringStripWS(FileRead($strategyFile), 3)
+    Return ($sContent <> "")
 EndFunc
 
 Func _SaveConfigAndExit()
@@ -451,10 +467,12 @@ EndFunc
 Func _UpdateEnginePaths($sEngineSelected)
     If StringInStr($sEngineSelected, "Zapret2") Then
         $currentEngine = "Zapret2"
+		$strategyFile = @ScriptDir & "\config\strategy2.txt"
         $winwsPath = @ScriptDir & "\bin\zapret\zapret-winws\winws2.exe"
         GUICtrlSetData($lblFooter, "Zapret2 v1.0.5.2")
     Else
         $currentEngine = "Zapret1"
+		$strategyFile = @ScriptDir & "\config\strategy.txt"
         $winwsPath = @ScriptDir & "\bin\zapret\zapret-winws\winws.exe"
         GUICtrlSetData($lblFooter, "Zapret v72.12")
     EndIf
@@ -476,24 +494,45 @@ Func _SetButtonsState(ByRef $aBtnArray, $iState)
     Next
 EndFunc
 
-#include <Constants.au3>
-
 Func CheckDnsPoisoningSilent()
+
+	; Gizli ayar: checkdns=0 ise DNS kontrolünü tamamen atla.
+    Local $checkDns = IniRead(@ScriptDir & "\config\config.ini", "Settings", "checkdns", "1")
+    If StringStripWS($checkDns, 3) = "0" Then Return False
+
     Local $safePrefix = "162.159"
     Local $ttPoisonIP = "195.175.254.2"
+	Local $iPID = 0
+	Local $sIP = ""
+	Local $testDomain = "updates.discord.com"
 
     ; DNS önbelleğini temizle
     RunWait(@ComSpec & " /c ipconfig /flushdns", "", @SW_HIDE)
 
-    ; PowerShell ile DNS sorgusu
-    Local $iPID = Run( _
-        'powershell.exe -NoProfile -NonInteractive -Command "[System.Net.Dns]::GetHostAddresses(' & "'" & "discord.com" & "'" & ') | Select-Object -ExpandProperty IPAddressToString | Select-Object -First 1"', _
-        "", @SW_HIDE, $STDOUT_CHILD + $STDERR_MERGED)
+	; 1. deneme: PATH üzerinden PowerShell
+	$iPID = Run( _
+		'powershell.exe -NoProfile -NonInteractive -Command "[System.Net.Dns]::GetHostAddresses(' & "'" & $testDomain & "'" & ') | Select-Object -ExpandProperty IPAddressToString | Select-Object -First 1"', _
+		"", @SW_HIDE, $STDOUT_CHILD + $STDERR_MERGED)
+
+	; 2. deneme: PowerShell tam yolu
+
+	If $iPID = 0 Then
+		$iPID = Run( _
+			'"' & @SystemDir & '\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "[System.Net.Dns]::GetHostAddresses(' & "'" & $testDomain & "'" & ') | Select-Object -ExpandProperty IPAddressToString | Select-Object -First 1"', _
+			"", @SW_HIDE, $STDOUT_CHILD + $STDERR_MERGED)
+	EndIf
+
+	; 3. deneme: nslookup
+
+	If $iPID = 0 Then
+		$iPID = Run( _
+			@ComSpec & ' /c nslookup ' & $testDomain, _
+			"", @SW_HIDE, $STDOUT_CHILD + $STDERR_MERGED)
+	EndIf
 
     If $iPID = 0 Then Return True
 
     Local $hTimer = TimerInit()
-    Local $sIP = ""
 
     ; En fazla 5 saniye bekle
     While ProcessExists($iPID)
@@ -566,7 +605,7 @@ EndFunc
 
 Func StartWinws($ctrlID, $statusID, $aBtns)
     Local $activeStrategy = _GetActiveStrategyString()
-    If $activeStrategy = "" Then Return MsgBox(48 + 8192, "Hata", "Lütfen hazır stratejilerden birini seçin.")
+    If $activeStrategy = "" Then Return MsgBox(48 + 8192, "Hata", "Strateji dosyanız boş.")
 
     Local $fullCommand = ""
 
