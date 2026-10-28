@@ -1,10 +1,10 @@
-﻿#RequireAdmin
+#RequireAdmin
 #Region ;**** Directives created by AutoIt3Wrapper_GUI ****
 #AutoIt3Wrapper_Icon=bin\zapret\zapret-winws\winws2.ico
 #AutoIt3Wrapper_UseX64=y
 #AutoIt3Wrapper_Res_Description=Zapret Multi-Engine Windows Türkiye - Zapret & Zapret2 Kontrol Aracı
-#AutoIt3Wrapper_Res_Fileversion=4.5.0.0
-#AutoIt3Wrapper_Res_ProductVersion=4.5
+#AutoIt3Wrapper_Res_Fileversion=4.7.0.0
+#AutoIt3Wrapper_Res_ProductVersion=4.7
 #AutoIt3Wrapper_Res_LegalCopyright=Ali Mali
 #AutoIt3Wrapper_Res_Language=1055
 #EndRegion ;**** Directives created by AutoIt3Wrapper_GUI ****
@@ -18,6 +18,8 @@
 #include <TrayConstants.au3>
 #include <ComboConstants.au3>
 #include <EditConstants.au3>
+#include <GuiListView.au3>
+#include <Constants.au3>
 
 ; --- ZIP / TEMP KLASÖRÜ KONTROLÜ ---
 Local $currentDir = @ScriptDir
@@ -76,6 +78,9 @@ Global $currentEngine = "Zapret2"
 Global $isZapretRunning = False
 Global $zapretPID = 0
 Global $pcapPID = 0
+Global $v2rayPID = 0
+Global $maraPID = 0
+Global $lanShareMethod = 0 ; 1 = go-pcap2socks, 2 = v2ray + maradns
 Global $bServiceStoppedWarned = False
 Global $strategyTestPID = 0
 
@@ -94,7 +99,7 @@ Global $hInstallServiceUnlockTimer = 0
 Global $bInstallServiceEnableAfterLock = True
 
 ; --- GUI Tasarımı ---
-Global $hGUI = GUICreate("Zapret Windows Türkiye v4.5", 400, 535)
+Global $hGUI = GUICreate("Zapret Windows Türkiye v4.7", 400, 535)
 GUISetBkColor(0xFFFFFF)
 
 ; --- Tepsi Menüsü ---
@@ -320,10 +325,7 @@ While 1
 				If GUICtrlRead($btnLanShare) = "[ ✓ ] Paylaşım Aktif / Durdur" Then
 					GUICtrlSetData($btnLanShare, "Ağdaki Cihazlarla Paylaş")
                     GUICtrlSetFont($btnLanShare, 10, 600, 0, "Segoe UI")
-					If ProcessExists("go-pcap2socks.exe") Then
-						ProcessClose("go-pcap2socks.exe")
-						$pcapPID = 0
-					EndIf
+                    _StopLanShareProcesses()
 				EndIf
 			EndIf
 
@@ -437,82 +439,70 @@ While 1
             $hBlockcheckUnlockTimer = TimerInit()
             EndIf ; $bBlockcheckBusy kilit bloğu
 
-		Case $btnLanShare
+        Case $btnLanShare
             If GUICtrlRead($btnLanShare) = "Ağdaki Cihazlarla Paylaş" Then
-                ; --- ADIM 1: NPCAP KONTROLÜ ---
+                Local $iShareChoice = _ChooseLanShareMethod()
+                If $iShareChoice = 0 Then ContinueLoop
+                If $iShareChoice = 2 Then
+                    If Not _StartV2rayMaraDNS() Then ContinueLoop
+                    $lanShareMethod = 2
+                    GUICtrlSetData($btnLanShare, "[ ✓ ] Paylaşım Aktif / Durdur")
+                    GUICtrlSetFont($btnLanShare, 10, 800, 0, "Segoe UI")
+                    ContinueLoop
+                EndIf
+
+                ; Mevcut go-pcap2socks yöntemi
                 If Not FileExists(@SystemDir & "\Packet.dll") Then
-                    GUICtrlSetData($btnLanShare, "Ağdaki Cihazlarla Paylaş")
-                    GUICtrlSetFont($btnLanShare, 10, 600, 0, "Segoe UI")
                     MsgBox(8208, "Eksik Bileşen", "HATA: Sistemde Npcap sürücüsü bulunamadı!" & @CRLF & @CRLF & _
                             "go-pcap2socks motorunun çalışabilmesi için Npcap kurulmalıdır." & @CRLF & _
                             "Lütfen npcap.com adresinden indirip kurun.")
                     ContinueLoop
                 EndIf
 
-                ; --- SPLASH SCREEN BAŞLANGICI ---
                 Local $hSplash = GUICreate("Lütfen Bekleyin", 280, 80, -1, -1, $WS_POPUP, $WS_EX_TOPMOST)
                 GUISetBkColor(0xF2F4F7, $hSplash)
                 GUICtrlCreateLabel("Güvenlik Duvarı" & @CRLF & "Kontrolleri Yapılıyor...", 10, 20, 260, 40, $SS_CENTER)
                 GUICtrlSetFont(-1, 10, 800, 0, "Segoe UI")
                 GUICtrlSetColor(-1, 0x2C3E50)
                 GUISetState(@SW_SHOW, $hSplash)
-
-                Local $targetPcapExe = @ScriptDir & '\bin\go-pcap2socks\go-pcap2socks.exe'
+                Local $targetPcapExe = @ScriptDir & "\bin\go-pcap2socks\go-pcap2socks.exe"
 
                 If Not HasFirewallRule($targetPcapExe) Then
                     GUISetState(@SW_HIDE, $hSplash)
-
                     RunWait('powershell -NoProfile -Command "Remove-NetFirewallRule -Program ''' & $targetPcapExe & ''' -ErrorAction SilentlyContinue"', "", @SW_HIDE)
                     RunWait(@ComSpec & ' /c netsh advfirewall firewall delete rule name=all program="' & $targetPcapExe & '"', "", @SW_HIDE)
-
                     MsgBox(8256, "Güvenlik Duvarı İzni", "go-pcap2socks için ağ izni gerekiyor." & @CRLF & @CRLF & _
                             "1. Birazdan Windows Güvenlik Duvarı uyarısı gelecektir." & @CRLF & _
-                            "2. Lütfen gelen ekranda kutucukları işaretleyip 'Erişime izin ver' (Allow) butonuna basın.")
-
-                    Local $tmpPID = Run('"' & $targetPcapExe & '"', @ScriptDir & '\bin\go-pcap2socks', @SW_HIDE)
+                            "2. Gelen ekranda kutucukları işaretleyip 'Erişime izin ver' butonuna basın.")
+                    Local $tmpPID = Run('"' & $targetPcapExe & '"', @ScriptDir & "\bin\go-pcap2socks", @SW_HIDE)
                     MsgBox(8256, "Onay", "Güvenlik duvarı iznini onayladıysanız Tamam'a basın.")
-                    ProcessClose($tmpPID)
-
+                    If $tmpPID > 0 Then ProcessClose($tmpPID)
                     GUISetState(@SW_SHOW, $hSplash)
                 EndIf
 
-                ; --- ADIM 3: SÜRECİ BAŞLATMA ---
                 If Not ProcessExists("go-pcap2socks.exe") Then
-                    $pcapPID = Run('"' & $targetPcapExe & '"', @ScriptDir & '\bin\go-pcap2socks', @SW_HIDE)
+                    $pcapPID = Run('"' & $targetPcapExe & '"', @ScriptDir & "\bin\go-pcap2socks", @SW_HIDE)
                 EndIf
-
-                ; --- GERÇEKTEN ÇALIŞIYOR MU KONTROLÜ ---
                 Sleep(500)
-
                 If Not ProcessExists("go-pcap2socks.exe") Then
                     GUIDelete($hSplash)
-                    GUICtrlSetData($btnLanShare, "Ağdaki Cihazlarla Paylaş")
-                    GUICtrlSetFont($btnLanShare, 10, 600, 0, "Segoe UI")
                     $pcapPID = 0
                     MsgBox(16 + 8192, "Başlatma Hatası", "HATA: go-pcap2socks başlatılamadı!" & @CRLF & @CRLF & _
-                            "• Sanal bir ağ kartı oluşturan VPN vb program kullanıyorsanız kapatın.")
+                            "Sanal ağ kartı oluşturan VPN vb. programları kapatıp tekrar deneyin.")
                     ContinueLoop
                 EndIf
-
                 GUIDelete($hSplash)
-
-                ; BAŞARILI DURUM: Butonu Yeşile Boya ve Metni Değiştir
+                $lanShareMethod = 1
                 GUICtrlSetData($btnLanShare, "[ ✓ ] Paylaşım Aktif / Durdur")
                 GUICtrlSetFont($btnLanShare, 10, 800, 0, "Segoe UI")
-
                 MsgBox(8256, "go-pcap2socks Ağ Yapılandırması", _
                         "Ağdaki diğer cihazınızda şu IP ayarlarını giriniz:" & @CRLF & @CRLF & _
                         "• IP Aralığı: 172.24.2.10 - 172.24.2.255" & @CRLF & _
                         "• Ağ Geçidi (Gateway): 172.24.2.1" & @CRLF & _
                         "• Alt Ağ Maskesi (Maske): 255.255.0.0" & @CRLF & _
-                        "• DNS 1: 1.1.1.1" & @CRLF & _
-                        "• DNS 2: 8.8.8.8")
+                        "• DNS 1: 1.1.1.1" & @CRLF & "• DNS 2: 8.8.8.8")
             Else
-                ; DURDURMA İŞLEMİ
-                If ProcessExists("go-pcap2socks.exe") Then
-                    ProcessClose("go-pcap2socks.exe")
-                    $pcapPID = 0
-                EndIf
+                _StopLanShareProcesses()
                 GUICtrlSetData($btnLanShare, "Ağdaki Cihazlarla Paylaş")
                 GUICtrlSetFont($btnLanShare, 10, 600, 0, "Segoe UI")
             EndIf
@@ -661,15 +651,50 @@ Func _SetSystemDNS()
 EndFunc
 
 Func _ResetSystemDNS()
+    Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
+    If Not IsObj($oWMI) Then Return False
 
-    ; Aktif ağ bağdaştırıcısını bul
-    Local $psScript = "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up' -and $_.InterfaceDescription -notlike '*Virtual*' -and $_.InterfaceDescription -notlike '*Hyper-V*' -and $_.InterfaceDescription -notlike '*WSL*' -and $_.Name -notlike '*vEthernet*' -and $_.InterfaceDescription -notlike '*TAP*' -and $_.InterfaceDescription -notlike '*TUN*' -and $_.InterfaceDescription -notlike '*VPN*'} | Select-Object -First 1; "
+    Local $oAdapters = $oWMI.ExecQuery( _
+        "SELECT * FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled=True")
 
-    ; Her iki sistem için: DNS'i otomatiğe (DHCP) al ve DNS önbelleğini sıfırla
-    $psScript &= "Set-DnsClientServerAddress -InterfaceAlias $adapter.Name -ResetServerAddresses; " & _
-                 "ipconfig /flushdns;"
+    If Not IsObj($oAdapters) Then Return False
 
-    RunWait('powershell -NoProfile -ExecutionPolicy Bypass -Command "' & $psScript & '"', "", @SW_HIDE)
+    Local $bReset = False
+
+    For $oAdapter In $oAdapters
+        If Not IsArray($oAdapter.DefaultIPGateway) Then ContinueLoop
+
+        Local $sDesc = String($oAdapter.Description)
+        If StringRegExp($sDesc, _
+            "(?i)Virtual|Hyper-V|WSL|TAP|TUN|VPN|VirtualBox|VMware|Loopback|WireGuard|Wintun") Then ContinueLoop
+
+        ; Dinamik arayüz adını bul
+        Local $sAdapterName = ""
+        Local $oNetAdapters = $oWMI.ExecQuery( _
+            "SELECT * FROM Win32_NetworkAdapter WHERE Index=" & $oAdapter.Index)
+
+        For $oNetAdapter In $oNetAdapters
+            $sAdapterName = $oNetAdapter.NetConnectionID
+            If Not IsString($sAdapterName) Then $sAdapterName = ""
+        Next
+
+        If $sAdapterName = "" Then ContinueLoop
+
+        ; IPv4 DNS: DHCP üzerinden otomatik al
+        Local $iIPv4 = RunWait(@ComSpec & ' /c netsh interface ipv4 set dnsservers name="' & _
+            $sAdapterName & '" source=dhcp', "", @SW_HIDE)
+
+        ; IPv6 DNS: DHCP üzerinden otomatik al
+        Local $iIPv6 = RunWait(@ComSpec & ' /c netsh interface ipv6 set dnsservers name="' & _
+            $sAdapterName & '" source=dhcp', "", @SW_HIDE)
+
+        If $iIPv4 = 0 And $iIPv6 = 0 Then $bReset = True
+    Next
+
+    ; DNS önbelleğini temizle
+    RunWait(@ComSpec & " /c ipconfig /flushdns", "", @SW_HIDE)
+
+    Return $bReset
 EndFunc
 
 ; --- MOTORA GÖRE HAZIR STRATEJİ LİSTESİNİ DOLDURAN FONKSİYON ---
@@ -811,9 +836,483 @@ Func ShowGUI()
     GUISetState(@SW_RESTORE, $hGUI)
 EndFunc
 
+
+Func _ChooseLanShareMethod()
+    ; Kompakt seçim penceresi: seçenekler yan yana, açıklamalar ayrı satırlarda ortalı.
+    Local $hChoice = GUICreate("Ağdaki Cihazlarla Paylaş", 340, 310, -1, -1, BitOR($WS_CAPTION, $WS_SYSMENU), 0, $hGUI)
+    GUISetBkColor(0xF4F6F9, $hChoice)
+
+    Local $lblTitle = GUICtrlCreateLabel("Paylaşım yöntemini seç", 12, 12, 316, 24, $SS_CENTER)
+    GUICtrlSetFont($lblTitle, 11, 700, 0, "Segoe UI")
+    GUICtrlSetColor($lblTitle, 0x243247)
+
+    Local $radPcap = GUICtrlCreateRadio("go-pcap2socks", 28, 46, 140, 24)
+    GUICtrlSetFont($radPcap, 10, 600, 0, "Segoe UI")
+    Local $radV2ray = GUICtrlCreateRadio("v2ray && maradns", 176, 46, 140, 24)
+    GUICtrlSetFont($radV2ray, 10, 600, 0, "Segoe UI")
+    GUICtrlSetState($radPcap, $GUI_CHECKED)
+
+    ; Her madde ayrı Label kontrolünde: AutoIt'in metni yatay birleştirmesi/yorumlaması önlenir.
+    Local $lblInfoBg = GUICtrlCreateLabel("", 25, 82, 290, 112)
+    GUICtrlSetBkColor($lblInfoBg, 0xDCEBFF)
+    Local $lblInfo1 = GUICtrlCreateLabel("", 30, 91, 280, 22, BitOR($SS_CENTER, $SS_CENTERIMAGE))
+    Local $lblInfo2 = GUICtrlCreateLabel("", 30, 116, 280, 22, BitOR($SS_CENTER, $SS_CENTERIMAGE))
+    Local $lblInfo3 = GUICtrlCreateLabel("", 30, 141, 280, 22, BitOR($SS_CENTER, $SS_CENTERIMAGE))
+    Local $lblInfo4 = GUICtrlCreateLabel("", 30, 166, 280, 22, BitOR($SS_CENTER, $SS_CENTERIMAGE))
+    GUICtrlSetFont($lblInfo1, 10, 600, 0, "Segoe UI")
+    GUICtrlSetColor($lblInfo1, 0x173D75)
+    GUICtrlSetBkColor($lblInfo1, 0xDCEBFF)
+    GUICtrlSetFont($lblInfo2, 10, 600, 0, "Segoe UI")
+    GUICtrlSetColor($lblInfo2, 0x173D75)
+    GUICtrlSetBkColor($lblInfo2, 0xDCEBFF)
+    GUICtrlSetFont($lblInfo3, 10, 600, 0, "Segoe UI")
+    GUICtrlSetColor($lblInfo3, 0x173D75)
+    GUICtrlSetBkColor($lblInfo3, 0xDCEBFF)
+    GUICtrlSetFont($lblInfo4, 10, 600, 0, "Segoe UI")
+    GUICtrlSetColor($lblInfo4, 0x173D75)
+    GUICtrlSetBkColor($lblInfo4, 0xDCEBFF)
+    GUICtrlSetData($lblInfo1, "Trafik sorunsuz aktarılır.")
+    GUICtrlSetData($lblInfo2, "NAT bozulmaz.")
+    GUICtrlSetData($lblInfo3, "WiFi ile yavaş olabilir.")
+	GUICtrlSetData($lblInfo4, "Yavaşsa PC-Modem Kablolu kullanın.")
+
+    Local $btnStart = GUICtrlCreateButton("Başlat", 25, 208, 290, 36)
+    GUICtrlSetFont($btnStart, 10, 700, 0, "Segoe UI")
+
+    Local $btnScanDevices = GUICtrlCreateButton("Ağdaki Cihazları Tara", 25, 252, 290, 34)
+    GUICtrlSetFont($btnScanDevices, 9, 600, 0, "Segoe UI")
+
+	; Seçim penceresi açıkken ana pencerenin tıklanmasını engelle.
+    GUISetState(@SW_DISABLE, $hGUI)
+
+
+    GUISetState(@SW_SHOW, $hChoice)
+    Local $iChoice = 0
+    While 1
+        Local $nChoice = GUIGetMsg()
+        Switch $nChoice
+            Case $GUI_EVENT_CLOSE
+                ExitLoop
+            Case $radPcap
+                GUICtrlSetData($lblInfo1, "Trafik sorunsuz aktarılır.")
+                GUICtrlSetData($lblInfo2, "NAT bozulmaz.")
+                GUICtrlSetData($lblInfo3, "WiFi ile yavaş olabilir.")
+				GUICtrlSetData($lblInfo4, "Yavaşsa PC-Modem Kablolu kullanın.")
+            Case $radV2ray
+                GUICtrlSetData($lblInfo1, "Bazı servislere erişim sorunlu olabilir.")
+                GUICtrlSetData($lblInfo2, "NAT bozulur.")
+                GUICtrlSetData($lblInfo3, "Hız düşüşü olmaz.")
+                GUICtrlSetData($lblInfo4, "Roblox'ta sorun çıkarmaz.")
+            Case $btnScanDevices
+                _ShowLanDeviceScan($hChoice)
+            Case $btnStart
+                If BitAND(GUICtrlRead($radPcap), $GUI_CHECKED) = $GUI_CHECKED Then
+                    $iChoice = 1
+                ElseIf BitAND(GUICtrlRead($radV2ray), $GUI_CHECKED) = $GUI_CHECKED Then
+                    $iChoice = 2
+                EndIf
+                ExitLoop
+        EndSwitch
+        Sleep(20)
+    WEnd
+    GUIDelete($hChoice)
+
+    ; Seçim penceresi kapandıktan sonra ana pencereyi etkinleştir ve odağı geri ver.
+    GUISetState(@SW_ENABLE, $hGUI)
+    GUISetState(@SW_RESTORE, $hGUI)
+    WinActivate($hGUI)
+    WinWaitActive($hGUI, "", 2)
+
+    Return $iChoice
+EndFunc
+
+Func _ShowLanDeviceScan($hParent)
+    Local $hScan = GUICreate("Ağdaki Cihazlar", 550, 440, -1, -1, BitOR($WS_CAPTION, $WS_SYSMENU, $WS_MINIMIZEBOX), 0, $hParent)
+    GUISetBkColor(0xF4F6F9, $hScan)
+    Local $lblScan = GUICtrlCreateLabel("Yerel ağ taranıyor. Bu işlem birkaç saniye sürebilir...", 16, 14, 518, 24, $SS_LEFT)
+    GUICtrlSetFont($lblScan, 10, 600, 0, "Segoe UI")
+    Local $lblSummary = GUICtrlCreateLabel("Ağdaki cihazlar listeleniyor...", 16, 42, 518, 22)
+    GUICtrlSetFont($lblSummary, 9, 400, 0, "Segoe UI")
+    Local $lvDevices = GUICtrlCreateListView("IP ADRESİ|MAC ADRESİ|ÜRETİCİ", 16, 72, 518, 310, BitOR($LVS_REPORT, $LVS_SHOWSELALWAYS))
+    GUICtrlSetFont($lvDevices, 9, 400, 0, "Segoe UI")
+    _GUICtrlListView_SetExtendedListViewStyle(GUICtrlGetHandle($lvDevices), BitOR($LVS_EX_FULLROWSELECT, $LVS_EX_DOUBLEBUFFER))
+    _GUICtrlListView_SetColumnWidth(GUICtrlGetHandle($lvDevices), 0, 105)
+    _GUICtrlListView_SetColumnWidth(GUICtrlGetHandle($lvDevices), 1, 135)
+    _GUICtrlListView_SetColumnWidth(GUICtrlGetHandle($lvDevices), 2, 255)
+    Local $btnClose = GUICtrlCreateButton("Kapat", 422, 394, 112, 30)
+    GUISetState(@SW_SHOW, $hScan)
+    GUICtrlSetData($lblSummary, "PowerShell ile yerel alt ağdaki yanıt veren cihazlar aranıyor...")
+    Local $sPsPath = @TempDir & "\zapret_lan_scan_" & @AutoItPID & ".ps1"
+    Local $sPs = "" & _
+            "$ErrorActionPreference = 'SilentlyContinue'" & @CRLF & _
+            "$route = Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Sort-Object RouteMetric | Select-Object -First 1" & @CRLF & _
+            "if (-not $route) { Write-Output 'Varsayılan ağ bağlantısı bulunamadı.'; exit }" & @CRLF & _
+            "$ip = Get-NetIPAddress -InterfaceIndex $route.InterfaceIndex -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '169.254.*' -and $_.IPAddress -ne '127.0.0.1' } | Select-Object -First 1" & @CRLF & _
+            "if (-not $ip) { Write-Output 'Etkin ağ arayüzünün IPv4 adresi bulunamadı.'; exit }" & @CRLF & _
+            "$prefix = [int]$ip.PrefixLength" & @CRLF & _
+            "if ($prefix -lt 20) { Write-Output ('Ağ çok geniş (/' + $prefix + '). Güvenli süre sınırı nedeniyle tarama yapılmadı.'); exit }" & @CRLF & _
+            "if ($prefix -ge 31) { Write-Output ('Tarama için uygun bir yerel alt ağ bulunamadı: ' + $ip.IPAddress + '/' + $prefix); exit }" & @CRLF & _
+            "$oct = [System.Net.IPAddress]::Parse($ip.IPAddress).GetAddressBytes()" & @CRLF & _
+            "$net = @()" & @CRLF & _
+            "for ($i=0; $i -lt 4; $i++) {" & @CRLF & _
+            "  $remaining = $prefix - ($i * 8)" & @CRLF & _
+            "  if ($remaining -ge 8) { $mask = 255 } elseif ($remaining -le 0) { $mask = 0 } else { $mask = 256 - [math]::Pow(2, 8 - $remaining) }" & @CRLF & _
+            "  $net += ([int]$oct[$i] -band [int]$mask)" & @CRLF & _
+            "}" & @CRLF & _
+            "$base = ($net -join '.')" & @CRLF & _
+            "$count = [int][math]::Pow(2, 32 - $prefix)" & @CRLF & _
+            "if ($count -gt 4096) { Write-Output ('Alt ağ çok geniş; tarama yapılmadı: ' + $ip.IPAddress + '/' + $prefix); exit }" & @CRLF & _
+            "$tasks = @()" & @CRLF & _
+            "$targets = @{}" & @CRLF & _
+            "for ($n=1; $n -lt ($count - 1); $n++) {" & @CRLF & _
+            "  $v = $n; $parts = @([int]$net[0], [int]$net[1], [int]$net[2], [int]$net[3])" & @CRLF & _
+            "  for ($j=3; $j -ge 0; $j--) { $parts[$j] += ($v -band 255); $v = $v -shr 8 }" & @CRLF & _
+            "  $addr = $parts -join '.'" & @CRLF & _
+            "  if ($addr -eq $ip.IPAddress) { continue }" & @CRLF & _
+            "  $ping = New-Object System.Net.NetworkInformation.Ping" & @CRLF & _
+            "  $targets[$addr] = $ping" & @CRLF & _
+            "  $tasks += $ping.SendPingAsync($addr, 450)" & @CRLF & _
+            "}" & @CRLF & _
+            "try { [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]$tasks, 1800) | Out-Null } catch {}" & @CRLF & _
+            "$found = @{}" & @CRLF & _
+            "foreach ($task in $tasks) {" & @CRLF & _
+            "  try { if ($task.IsCompleted -and -not $task.IsFaulted -and $task.Result.Status -eq 'Success') { $found[$task.Result.Address.ToString()] = $true } } catch {}" & @CRLF & _
+            "}" & @CRLF & _
+            "foreach ($ping in $targets.Values) { try { $ping.Dispose() } catch {} }" & @CRLF & _
+            "# Yalnızca etkin arayüzün kendi alt ağındaki komşuları ekle." & @CRLF & _
+            "function Test-LocalSubnet([string]$address, [int[]]$network, [int]$prefixLength) {" & @CRLF & _
+            "  $bytes = [System.Net.IPAddress]::Parse($address).GetAddressBytes()" & @CRLF & _
+            "  for ($k = 0; $k -lt 4; $k++) { $bits = $prefixLength - ($k * 8); if ($bits -ge 8) { $mask = 255 } elseif ($bits -le 0) { $mask = 0 } else { $mask = 256 - [math]::Pow(2, 8 - $bits) }; if (($bytes[$k] -band [int]$mask) -ne ($network[$k] -band [int]$mask)) { return $false } }" & @CRLF & _
+            "  return $true" & @CRLF & _
+            "}" & @CRLF & _
+            "Get-NetNeighbor -InterfaceIndex $route.InterfaceIndex -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne $ip.IPAddress -and $_.IPAddress -notmatch '^(22[4-9]|23[0-9])\.' -and $_.IPAddress -notlike '255.*' -and $_.State -notin @('Unreachable','Incomplete') -and (Test-LocalSubnet $_.IPAddress $net $prefix) } | ForEach-Object { $found[$_.IPAddress] = $true }" & @CRLF & _
+            "if ($found.Count -eq 0) { Write-Output ('Yanıt veren cihaz bulunamadı. Yerel IP: ' + $ip.IPAddress + '/' + $prefix + '. Bazı cihazlar taramaya yanıt vermeyebilir.'); exit }" & @CRLF & _
+            "Write-Output ('Bilgisayar: ' + $ip.IPAddress + '/' + $prefix)" & @CRLF & _
+            "Write-Output ('Bulunan cihaz sayısı: ' + $found.Count)" & @CRLF & _
+            "Write-Output ''" & @CRLF & _
+            "Write-Output 'IP ADRESI`tMAC ADRESI`tURETICI'" & @CRLF & _
+            "foreach ($addr in ($found.Keys | Sort-Object { [version]$_ })) {" & @CRLF & _
+            "  $neighbor = Get-NetNeighbor -InterfaceIndex $route.InterfaceIndex -AddressFamily IPv4 -IPAddress $addr | Select-Object -First 1" & @CRLF & _
+            "  $mac = if ($neighbor) { $neighbor.LinkLayerAddress } else { 'Bilinmiyor' }" & @CRLF & _
+            "  Write-Output ($addr + ""`t"" + $mac + ""`t"" + ('Bilgiler getiriliyor...'))" & @CRLF & _
+            "}" & @CRLF
+
+
+    Local $hFile = FileOpen($sPsPath, 2 + 128)
+    If $hFile = -1 Then
+        GUICtrlSetData($lblSummary, "Tarama dosyası oluşturulamadı.")
+    Else
+        FileWrite($hFile, $sPs)
+        FileClose($hFile)
+        Local $iPID = Run('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' & $sPsPath & '"', @SystemDir, @SW_HIDE, $STDOUT_CHILD + $STDERR_CHILD)
+        If $iPID = 0 Then
+            GUICtrlSetData($lblSummary, "PowerShell başlatılamadı.")
+        Else
+            Local $sOutput = "", $sPending = ""
+            Local $aDeviceIPs[1], $aDeviceItems[1], $iDeviceCount = 0, $sNetwork = ""
+            While ProcessExists($iPID)
+                $sPending &= StdoutRead($iPID)
+                $sPending &= StderrRead($iPID)
+                While StringInStr($sPending, @LF)
+                    Local $iNL = StringInStr($sPending, @LF)
+                    Local $sLine = StringStripWS(StringLeft($sPending, $iNL - 1), 3)
+                    $sPending = StringTrimLeft($sPending, $iNL)
+                    $sOutput &= $sLine & @LF
+                    If StringLeft($sLine, 11) = "Bilgisayar:" Then $sNetwork = $sLine
+                    If StringLeft($sLine, 20) = "Bulunan cihaz sayısı:" Then GUICtrlSetData($lblSummary, $sLine)
+                    If StringInStr($sLine, @TAB) Then
+                        Local $aCols = StringSplit($sLine, @TAB, 2)
+                        If UBound($aCols) >= 3 Then
+                            If $aCols[0] = "UPDATE" Then
+                                For $k = 0 To $iDeviceCount - 1
+                                    If $aDeviceIPs[$k] = $aCols[1] Then
+                                        _GUICtrlListView_SetItemText(GUICtrlGetHandle($lvDevices), $aDeviceItems[$k], $aCols[2], 2)
+                                        ExitLoop
+                                    EndIf
+                                Next
+                            ElseIf StringRegExp($aCols[0], '^\d{1,3}(?:\.\d{1,3}){3}$') Then
+                                Local $iItem = _GUICtrlListView_GetItemCount(GUICtrlGetHandle($lvDevices))
+                                GUICtrlCreateListViewItem($aCols[0] & "|" & $aCols[1] & "|" & $aCols[2], $lvDevices)
+                                ReDim $aDeviceIPs[$iDeviceCount + 1]
+                                ReDim $aDeviceItems[$iDeviceCount + 1]
+                                $aDeviceIPs[$iDeviceCount] = $aCols[0]
+                                $aDeviceItems[$iDeviceCount] = $iItem
+                                $iDeviceCount += 1
+                            EndIf
+                        EndIf
+                    EndIf
+                    If StringInStr($sLine, "bulunamadı") Then GUICtrlSetData($lblSummary, $sLine)
+                WEnd
+                Sleep(40)
+            WEnd
+            $sPending &= StdoutRead($iPID)
+            If $sNetwork <> "" Then GUICtrlSetData($lblSummary, $sNetwork & "     •     Bulunan cihaz: " & $iDeviceCount)
+            If $iDeviceCount = 0 And StringStripWS($sOutput & $sPending, 8) <> "" Then GUICtrlSetData($lblSummary, StringLeft($sOutput & $sPending, 180))
+
+            ; Ağ taraması tamamlandı. Şimdi OUI veritabanını ayrı bir PowerShell işlemiyle indirip mevcut satırları güncelle.
+            If $iDeviceCount > 0 Then
+                GUICtrlSetData($lblScan, "Üretici bilgileri alınıyor...")
+                GUICtrlSetData($lblSummary, "Üretici bilgileri güncelleniyor...")
+
+                Local $sVendorInput = @TempDir & "\zapret_oui_input_" & @AutoItPID & ".txt"
+                Local $sVendorOutput = @TempDir & "\zapret_oui_output_" & @AutoItPID & ".txt"
+                Local $sVendorPsPath = @TempDir & "\zapret_oui_lookup_" & @AutoItPID & ".ps1"
+                Local $sVendorUrl = "https://raw.githubusercontent.com/alimali54/zapret-win-turkey/refs/heads/master/oui.txt"
+                Local $hVendorInput = FileOpen($sVendorInput, 2 + 128)
+
+                If $hVendorInput <> -1 Then
+                    For $j = 0 To $iDeviceCount - 1
+                        Local $sMacForLookup = _GUICtrlListView_GetItemText(GUICtrlGetHandle($lvDevices), $aDeviceItems[$j], 1)
+                        FileWriteLine($hVendorInput, $j & @TAB & $sMacForLookup)
+                    Next
+                    FileClose($hVendorInput)
+
+                    Local $sVendorPS = "$ErrorActionPreference = 'Stop'" & @CRLF & _
+                        "$url = '" & $sVendorUrl & "'" & @CRLF & _
+                        "$inputPath = '" & StringReplace($sVendorInput, "'", "''") & "'" & @CRLF & _
+                        "$outputPath = '" & StringReplace($sVendorOutput, "'", "''") & "'" & @CRLF & _
+                        "$ouiPath = Join-Path $env:TEMP 'zapret_oui_db.txt'" & @CRLF & _
+                        "try {" & @CRLF & _
+                        "  if (-not (Test-Path $ouiPath)) { Invoke-WebRequest -Uri $url -OutFile $ouiPath -UseBasicParsing -TimeoutSec 20 }" & @CRLF & _
+                        "  $vendors = @{}" & @CRLF & _
+                        "  foreach ($line in [System.IO.File]::ReadLines($ouiPath)) {" & @CRLF & _
+                        "    if ($line -match '^\s*([0-9A-Fa-f]{2}(?:-[0-9A-Fa-f]{2}){2})\s+\(hex\)\s+(.+?)\s*$') {" & @CRLF & _
+                        "      $prefix = $matches[1].Replace('-', '').ToUpperInvariant()" & @CRLF & _
+                        "      if (-not $vendors.ContainsKey($prefix)) { $vendors[$prefix] = $matches[2].Trim() }" & @CRLF & _
+                        "    }" & @CRLF & _
+                        "  }" & @CRLF & _
+                        "  $result = foreach ($item in [System.IO.File]::ReadLines($inputPath)) {" & @CRLF & _
+                        "    $parts = $item.Split([char]9, 2)" & @CRLF & _
+                        "    if ($parts.Count -ge 2) {" & @CRLF & _
+                        "      $mac = ($parts[1] -replace '[:-]', '').ToUpperInvariant()" & @CRLF & _
+                        "      $prefix = if ($mac.Length -ge 6) { $mac.Substring(0, 6) } else { '' }" & @CRLF & _
+                        "      $vendor = if ($vendors.ContainsKey($prefix)) { $vendors[$prefix] } else { ('Bilinmeyen ' + [char]0x00DC + 'retici') }" & @CRLF & _
+                        "      $parts[0] + [char]9 + $vendor" & @CRLF & _
+                        "    }" & @CRLF & _
+                        "  }" & @CRLF & _
+                        "  [System.IO.File]::WriteAllLines($outputPath, [string[]]$result, [System.Text.Encoding]::UTF8)" & @CRLF & _
+                        "} catch { [System.IO.File]::WriteAllText($outputPath, 'ERROR' + [char]9 + $_.Exception.Message, [System.Text.Encoding]::UTF8); exit 1 }" & @CRLF
+
+                    If FileWrite($sVendorPsPath, $sVendorPS) Then
+                        Local $iVendorPID = Run('powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' & $sVendorPsPath & '"', @SystemDir, @SW_HIDE)
+                        If $iVendorPID <> 0 Then
+                            ProcessWaitClose($iVendorPID)
+                            If FileExists($sVendorOutput) Then
+                                Local $hVendorOutput = FileOpen($sVendorOutput, 128)
+                                If $hVendorOutput <> -1 Then
+                                    While 1
+                                        Local $sVendorLine = FileReadLine($hVendorOutput)
+                                        If @error Then ExitLoop
+                                        Local $aVendorResult = StringSplit($sVendorLine, @TAB, 2)
+                                        If UBound($aVendorResult) >= 2 Then
+                                            If $aVendorResult[0] = "ERROR" Then
+                                                GUICtrlSetData($lblSummary, "OUI indirme hatası: " & $aVendorResult[1])
+                                            ElseIf StringIsInt($aVendorResult[0]) Then
+                                                Local $iVendorIndex = Number($aVendorResult[0])
+                                                If $iVendorIndex >= 0 And $iVendorIndex < $iDeviceCount Then
+                                                    _GUICtrlListView_SetItemText(GUICtrlGetHandle($lvDevices), $aDeviceItems[$iVendorIndex], $aVendorResult[1], 2)
+                                                EndIf
+                                            EndIf
+                                        EndIf
+                                    WEnd
+                                    FileClose($hVendorOutput)
+                                EndIf
+                            Else
+                                GUICtrlSetData($lblSummary, "OUI sonuç dosyası oluşturulamadı.")
+                            EndIf
+                        Else
+                            GUICtrlSetData($lblSummary, "Üretici sorgusu için PowerShell başlatılamadı.")
+                        EndIf
+                    Else
+                        GUICtrlSetData($lblSummary, "Üretici sorgusu betiği oluşturulamadı.")
+                    EndIf
+                Else
+                    GUICtrlSetData($lblSummary, "Geçici MAC listesi oluşturulamadı.")
+                EndIf
+
+                If FileExists($sVendorInput) Then FileDelete($sVendorInput)
+                If FileExists($sVendorOutput) Then FileDelete($sVendorOutput)
+                If FileExists($sVendorPsPath) Then FileDelete($sVendorPsPath)
+                GUICtrlSetData($lblScan, "Ağdaki Cihazlar")
+                If StringInStr(GUICtrlRead($lblSummary), "OUI indirme hatası") = 0 Then _
+                    GUICtrlSetData($lblSummary, $sNetwork & "     •     Bulunan cihaz: " & $iDeviceCount & " • Üretici bilgileri güncellendi")
+            EndIf
+        EndIf
+        FileDelete($sPsPath)
+    EndIf
+
+    GUICtrlSetData($lblScan, "Ağdaki Cihazlar")
+    While 1
+        Local $iMsg = GUIGetMsg()
+        If $iMsg = $GUI_EVENT_CLOSE Or $iMsg = $btnClose Then ExitLoop
+        Sleep(20)
+    WEnd
+    GUIDelete($hScan)
+    GUISetState(@SW_RESTORE, $hParent)
+    WinActivate($hParent)
+EndFunc
+
+Func _StartV2rayMaraDNS()
+    Local $sV2rayDir = @ScriptDir & "\bin\v2ray"
+    Local $sMaraDir = @ScriptDir & "\bin\maradns"
+    Local $sZoneFile = $sMaraDir & "\zone-redirect-all.txt"
+    Local $sV2rayCmd = $sV2rayDir & "\v2ray-run.cmd"
+    Local $sMaraCmd = $sMaraDir & "\mara-run.cmd"
+
+    If Not FileExists($sV2rayCmd) Or Not FileExists($sMaraCmd) Or Not FileExists($sZoneFile) Then
+        MsgBox(16 + 8192, "Dosyalar Eksik", "v2ray + maradns başlatılamadı. Şu dosyaların varlığını kontrol et:" & @CRLF & _
+                $sV2rayCmd & @CRLF & $sMaraCmd & @CRLF & $sZoneFile)
+        Return False
+    EndIf
+
+    _StopV2rayMaraDNS()
+    Local $sIP = _GetPhysicalIPv4()
+    If $sIP = "" Or $sIP = "0.0.0.0" Then
+        MsgBox(16 + 8192, "IP Bulunamadı", "Bilgisayarın yerel IPv4 adresi bulunamadı.")
+        Return False
+    EndIf
+
+    Local $hZone = FileOpen($sZoneFile, 0)
+    If $hZone = -1 Then
+        MsgBox(16 + 8192, "Dosya Okunamadı", "MaraDNS zone dosyası okunamadı:" & @CRLF & $sZoneFile)
+        Return False
+    EndIf
+    Local $sZoneText = FileRead($hZone)
+    FileClose($hZone)
+    Local $aZoneLines = StringSplit(StringStripCR($sZoneText), @LF, 2)
+    If UBound($aZoneLines) < 2 Then
+        MsgBox(16 + 8192, "Zone Dosyası Hatalı", "zone-redirect-all.txt dosyasında beklenen satır yapısı bulunamadı.")
+        Return False
+    EndIf
+
+    ; VBS'deki gibi sondan bir önceki satırı yerel IP ile değiştir.
+    Local $iIPLine = UBound($aZoneLines) - 2
+    $aZoneLines[$iIPLine] = "* " & $sIP
+    Local $sNewZone = ""
+    For $i = 0 To UBound($aZoneLines) - 1
+        $sNewZone &= $aZoneLines[$i]
+        If $i < UBound($aZoneLines) - 1 Then $sNewZone &= @CRLF
+    Next
+    Local $hZoneOut = FileOpen($sZoneFile, 2)
+    If $hZoneOut = -1 Then
+        MsgBox(16 + 8192, "Dosya Yazılamadı", "MaraDNS zone dosyası güncellenemedi.")
+        Return False
+    EndIf
+    FileWrite($hZoneOut, $sNewZone)
+    FileClose($hZoneOut)
+
+    ; go-pcap2socks ile aynı izin akışı: mevcut izni kontrol et,
+    ; yoksa uygulamayı başlatıp Windows'un kendi izin istemini göster.
+    ; Program kendisi güvenlik duvarı kuralı oluşturmaz.
+    Local $sV2rayExe = $sV2rayDir & "\v2ray.exe"
+    Local $sMaraExe = $sMaraDir & "\maradns.exe"
+    If Not FileExists($sV2rayExe) Or Not FileExists($sMaraExe) Then
+        MsgBox(16 + 8192, "Dosyalar Eksik", "Güvenlik duvarı kontrolü için v2ray.exe ve maradns.exe dosyaları bulunamadı." & @CRLF & _
+                "Kontrol edilen yollar:" & @CRLF & $sV2rayExe & @CRLF & $sMaraExe)
+        Return False
+    EndIf
+
+    Local $hFwSplash = GUICreate("Lütfen Bekleyin", 280, 80, -1, -1, $WS_POPUP, $WS_EX_TOPMOST)
+    GUISetBkColor(0xF2F4F7, $hFwSplash)
+    GUICtrlCreateLabel("Güvenlik Duvarı" & @CRLF & "Kontrolleri Yapılıyor...", 10, 20, 260, 40, $SS_CENTER)
+    GUICtrlSetFont(-1, 10, 800, 0, "Segoe UI")
+    GUICtrlSetColor(-1, 0x2C3E50)
+    GUISetState(@SW_SHOW, $hFwSplash)
+
+                If Not HasFirewallRule($sV2rayExe) Then
+                    GUISetState(@SW_HIDE, $hFwSplash)
+                    RunWait('powershell -NoProfile -Command "Remove-NetFirewallRule -Program ''' & $sV2rayExe & ''' -ErrorAction SilentlyContinue"', "", @SW_HIDE)
+                    RunWait(@ComSpec & ' /c netsh advfirewall firewall delete rule name=all program="' & $sV2rayExe & '"', "", @SW_HIDE)
+                    MsgBox(8256, "Güvenlik Duvarı İzni", "v2ray için ağ izni gerekiyor." & @CRLF & @CRLF & _
+                            "1. Birazdan Windows Güvenlik Duvarı uyarısı gelecektir." & @CRLF & _
+                            "2. Gelen ekranda kutucukları işaretleyip 'Erişime izin ver' butonuna basın.")
+                    Local $tmpPID = Run('"' & $sV2rayCmd & '"', @ScriptDir & "\bin\v2ray", @SW_HIDE)
+                    MsgBox(8256, "Onay", "Güvenlik duvarı iznini onayladıysanız Tamam'a basın.")
+                    If $tmpPID > 0 Then ProcessClose("v2ray.exe")
+                    GUISetState(@SW_SHOW, $hFwSplash)
+                EndIf
+
+				If Not HasFirewallRule($sMaraExe) Then
+                    GUISetState(@SW_HIDE, $hFwSplash)
+                    RunWait('powershell -NoProfile -Command "Remove-NetFirewallRule -Program ''' & $sMaraExe & ''' -ErrorAction SilentlyContinue"', "", @SW_HIDE)
+                    RunWait(@ComSpec & ' /c netsh advfirewall firewall delete rule name=all program="' & $sMaraExe & '"', "", @SW_HIDE)
+                    MsgBox(8256, "Güvenlik Duvarı İzni", "maradns için ağ izni gerekiyor." & @CRLF & @CRLF & _
+                            "1. Birazdan Windows Güvenlik Duvarı uyarısı gelecektir." & @CRLF & _
+                            "2. Gelen ekranda kutucukları işaretleyip 'Erişime izin ver' butonuna basın.")
+                    Local $tmpPID = Run('"' & $sMaraCmd & '"', @ScriptDir & "\bin\maradns", @SW_HIDE)
+                    MsgBox(8256, "Onay", "Güvenlik duvarı iznini onayladıysanız Tamam'a basın.")
+                    If $tmpPID > 0 Then ProcessClose("maradns.exe")
+                    GUISetState(@SW_SHOW, $hFwSplash)
+                EndIf
+	GUIDelete($hFwSplash)
+
+	$v2rayPID = Run(@ComSpec & ' /k "' & $sV2rayCmd & '"', $sV2rayDir, @SW_HIDE)
+    Sleep(100)
+    $maraPID = Run(@ComSpec & ' /k "' & $sMaraCmd & '"', $sMaraDir, @SW_HIDE)
+    Sleep(300)
+
+    If Not ProcessExists("v2ray.exe") Or Not ProcessExists("maradns.exe") Then
+        MsgBox(48 + 8192, "Başlatma Kontrolü", "v2ray ve/veya maradns işlemi başlatılamadı.")
+		Return False
+	Else
+		MsgBox(64 + 8192, "v2ray & MaraDNS", "Ağdaki diğer cihazınızda DNS adresi olarak şu IP'yi girin:" & @CRLF & @CRLF & $sIP)
+		Return True
+    EndIf
+
+
+EndFunc
+
+Func _GetPhysicalIPv4()
+    Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
+    If Not IsObj($oWMI) Then Return ""
+
+    Local $sQuery = "SELECT IPAddress, DefaultIPGateway, Description " & _
+                    "FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled=True"
+
+    Local $oAdapters = $oWMI.ExecQuery($sQuery)
+    If Not IsObj($oAdapters) Then Return ""
+
+    For $oAdapter In $oAdapters
+        If Not IsArray($oAdapter.IPAddress) Then ContinueLoop
+        If Not IsArray($oAdapter.DefaultIPGateway) Then ContinueLoop
+
+        Local $sDesc = String($oAdapter.Description)
+
+        If StringRegExp($sDesc, "(?i)Virtual|Hyper-V|WSL|TAP|TUN|VPN|VirtualBox|VMware|Loopback|WireGuard|Wintun") Then
+            ContinueLoop
+        EndIf
+
+        For $sAddr In $oAdapter.IPAddress
+            If StringRegExp($sAddr, "^\d{1,3}(\.\d{1,3}){3}$") _
+                    And Not StringRegExp($sAddr, "^(127\.|169\.254\.)") _
+                    And $sAddr <> "0.0.0.0" Then
+                Return $sAddr
+            EndIf
+        Next
+    Next
+
+    Return ""
+EndFunc
+
+Func _StopV2rayMaraDNS()
+    If ProcessExists("v2ray.exe") Then RunWait(@ComSpec & " /c taskkill /F /IM v2ray.exe /T", "", @SW_HIDE)
+    If ProcessExists("maradns.exe") Then RunWait(@ComSpec & " /c taskkill /F /IM maradns.exe /T", "", @SW_HIDE)
+    If $v2rayPID > 0 And ProcessExists($v2rayPID) Then ProcessClose($v2rayPID)
+    If $maraPID > 0 And ProcessExists($maraPID) Then ProcessClose($maraPID)
+    $v2rayPID = 0
+    $maraPID = 0
+EndFunc
+
+Func _StopLanShareProcesses()
+    If ProcessExists("go-pcap2socks.exe") Then RunWait(@ComSpec & " /c taskkill /F /IM go-pcap2socks.exe /T", "", @SW_HIDE)
+    $pcapPID = 0
+    _StopV2rayMaraDNS()
+    $lanShareMethod = 0
+EndFunc
+
 Func ExitApp()
     If $isZapretRunning Then StopWinws($btnRunZapret, $lblStatusText, $aOtherButtons)
-    If ProcessExists("go-pcap2socks.exe") Then ProcessClose("go-pcap2socks.exe")
+    _StopLanShareProcesses()
     Exit
 EndFunc
 
@@ -823,24 +1322,45 @@ Func _SetButtonsState(ByRef $aBtnArray, $iState)
     Next
 EndFunc
 
-#include <Constants.au3>
-
 Func CheckDnsPoisoningSilent()
+
+	; Gizli ayar: checkdns=0 ise DNS kontrolünü tamamen atla.
+    Local $checkDns = IniRead(@ScriptDir & "\config\config.ini", "Settings", "checkdns", "1")
+    If StringStripWS($checkDns, 3) = "0" Then Return False
+
     Local $safePrefix = "162.159"
     Local $ttPoisonIP = "195.175.254.2"
+	Local $iPID = 0
+	Local $sIP = ""
+	Local $testDomain = "updates.discord.com"
 
     ; DNS önbelleğini temizle
     RunWait(@ComSpec & " /c ipconfig /flushdns", "", @SW_HIDE)
 
-    ; PowerShell ile DNS sorgusu
-    Local $iPID = Run( _
-        'powershell.exe -NoProfile -NonInteractive -Command "[System.Net.Dns]::GetHostAddresses(' & "'" & "discord.com" & "'" & ') | Select-Object -ExpandProperty IPAddressToString | Select-Object -First 1"', _
-        "", @SW_HIDE, $STDOUT_CHILD + $STDERR_MERGED)
+	; 1. deneme: PATH üzerinden PowerShell
+	$iPID = Run( _
+		'powershell.exe -NoProfile -NonInteractive -Command "[System.Net.Dns]::GetHostAddresses(' & "'" & $testDomain & "'" & ') | Select-Object -ExpandProperty IPAddressToString | Select-Object -First 1"', _
+		"", @SW_HIDE, $STDOUT_CHILD + $STDERR_MERGED)
+
+	; 2. deneme: PowerShell tam yolu
+
+	If $iPID = 0 Then
+		$iPID = Run( _
+			'"' & @SystemDir & '\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "[System.Net.Dns]::GetHostAddresses(' & "'" & $testDomain & "'" & ') | Select-Object -ExpandProperty IPAddressToString | Select-Object -First 1"', _
+			"", @SW_HIDE, $STDOUT_CHILD + $STDERR_MERGED)
+	EndIf
+
+	; 3. deneme: nslookup
+
+	If $iPID = 0 Then
+		$iPID = Run( _
+			@ComSpec & ' /c nslookup ' & $testDomain, _
+			"", @SW_HIDE, $STDOUT_CHILD + $STDERR_MERGED)
+	EndIf
 
     If $iPID = 0 Then Return True
 
     Local $hTimer = TimerInit()
-    Local $sIP = ""
 
     ; En fazla 5 saniye bekle
     While ProcessExists($iPID)
@@ -862,7 +1382,6 @@ Func CheckDnsPoisoningSilent()
 
     Return True
 EndFunc
-
 
 Func CheckServiceStatus($manualBtn, $statusID, $lockArray, $chkID)
     Local $iPid = Run(@ComSpec & " /c sc query " & $serviceName, "", @SW_HIDE, $STDOUT_CHILD)
@@ -1163,6 +1682,8 @@ Func RunBlockcheck2($ctrlID)
     ; Kullanıcı yeni analiz seçtiği için eski sonuçları geçersiz kıl.
     If FileExists(_BlockcheckResultsPath()) Then FileDelete(_BlockcheckResultsPath())
     If FileExists($logPath) Then FileDelete($logPath)
+	;config.ini içinde testdomain varsa blockcheck2.sh dosyasına yaz
+	If Not _PrepareTestDomain() Then Return
 
     Local $hScanGUI = GUICreate("Zapret2 Blockcheck", 360, 170, -1, -1, BitOR($WS_CAPTION, $WS_SYSMENU), 0, $hGUI)
     GUISetBkColor(0xFFFFFF, $hScanGUI)
@@ -1193,37 +1714,44 @@ Func RunBlockcheck2($ctrlID)
 
     ; İlk çalışan stratejide durmak yerine, analiz devam ettiği sürece
     ; logdaki tüm benzersiz AVAILABLE stratejilerini topluyoruz.
+
+	Local $hLogTimer = TimerInit()
     While ProcessExists($iPidBash)
         Local $nMsg = GUIGetMsg()
-        If $nMsg = $btnStopScan Or $nMsg = $GUI_EVENT_CLOSE Then
-            $bUserStopped = True
-            ExitLoop
-        EndIf
 
-        If FileExists($logPath) Then
-            Local $hFile = FileOpen($logPath, 0)
-            If $hFile <> -1 Then
-                Local $sContent = FileRead($hFile)
-                FileClose($hFile)
+		If $nMsg = $btnStopScan Or $nMsg = $GUI_EVENT_CLOSE Then
+			$bUserStopped = True
+			GUICtrlSetData($btnStopScan, "Analiz durduruluyor...")
+			GUICtrlSetState($btnStopScan, $GUI_DISABLE)
+			GUICtrlSetData($lblScanTitle, "Analiz durduruluyor...")
+			ExitLoop
+		EndIf
 
-                Local $sFiltered = StringReplace($sContent, "iana.org", "IGNORE")
-                If StringInStr($sFiltered, "!!!!! AVAILABLE !!!!!") Then
-                    _CollectStrategiesFromText($sContent, $aStrategies)
-                EndIf
-                If StringInStr($sContent, "working without bypass") Or StringInStr($sContent, "not blocked") Then
-                    $isNoBypassNeeded = True
-                EndIf
-            EndIf
-        EndIf
+		If TimerDiff($hLogTimer) >= 3000 Then
+			$hLogTimer = TimerInit()
 
-        If TimerDiff($hUiTimer) >= 250 Then
+			If FileExists($logPath) Then
+				Local $hFile = FileOpen($logPath, 0)
+				If $hFile <> -1 Then
+					Local $sContent = FileRead($hFile)
+					FileClose($hFile)
+
+					If StringInStr($sContent, "!!!!! AVAILABLE !!!!!") Then
+						_CollectStrategiesFromText($sContent, $aStrategies)
+					EndIf
+
+				EndIf
+			EndIf
+		EndIf
+
+        If TimerDiff($hUiTimer) >= 1000 Then
             Local $iSeconds = Int(TimerDiff($hTimer) / 1000)
             GUICtrlSetData($lblScanElapsed, "Geçen süre: " & StringFormat("%02d:%02d", Int($iSeconds / 60), Mod($iSeconds, 60)))
             GUICtrlSetData($lblScanCount, "Bulunan strateji: " & $aStrategies[0])
             $hUiTimer = TimerInit()
         EndIf
 
-        Sleep(150)
+        Sleep(10)
     WEnd
 
     ; Analiz doğal olarak bittiğinde de, kullanıcı durdurduğunda da
@@ -1244,11 +1772,24 @@ Func RunBlockcheck2($ctrlID)
         EndIf
     EndIf
 
-    If $aStrategies[0] > 0 Then
-        _ShowStrategyTestWindow($aStrategies, True)
-    ElseIf $isNoBypassNeeded Then
+	; Blockcheck sonlandığında isNoBypassNeeded için logu tekrar oku
+	Local $hFile = FileOpen($logPath, 0)
+
+	If $hFile <> -1 Then
+		Local $sContent = FileRead($hFile)
+		FileClose($hFile)
+
+		If StringInStr($sContent, "working without bypass") Or _
+		StringInStr($sContent, "not blocked") Then
+			$isNoBypassNeeded = True
+		EndIf
+	EndIf
+
+	If $isNoBypassNeeded Then
         MsgBox(64 + 8192, "Bilgi: Zapret2 Analiz Tamamlandı", _
             "İnternet hattınızda herhangi bir DPI / sansür kısıtlaması saptanmadı.")
+	ElseIf $aStrategies[0] > 0 Then
+        _ShowStrategyTestWindow($aStrategies, True)
     ElseIf $bUserStopped Then
         MsgBox(48 + 8192, "Analiz Durduruldu", "Analiz durduruldu. Kullanılabilir strateji bulunamadı.")
     Else
@@ -1257,6 +1798,105 @@ Func RunBlockcheck2($ctrlID)
 
     GUISetState(@SW_ENABLE, $hGUI)
     GUISetState(@SW_SHOW, $hGUI)
+
+	;orijinal blockcheck2.sh dosyasını geri yükle
+	_RestoreTestDomain()
+EndFunc
+
+Func _PrepareTestDomain()
+    Local $shPath = @ScriptDir & "\bin\zapret\blockcheck\zapret2\blockcheck2.sh"
+    Local $bakPath = $shPath & ".bak"
+
+    Local $testDomain = StringStripWS(IniRead($iniPath, "Settings", "testdomain", ""), 3)
+
+    ; Ayar yoksa varsayilan dosyayi kullan
+    If $testDomain = "" Then Return True
+
+    ; URL protokolunu ve www. on ekini temizle
+    $testDomain = StringRegExpReplace($testDomain, "(?i)^https?://", "")
+    $testDomain = StringRegExpReplace($testDomain, "(?i)^www\.", "")
+
+    ; Yol, port, sorgu ve fragment kisimlarini temizle
+    $testDomain = StringRegExpReplace($testDomain, "[/?#].*$", "")
+    $testDomain = StringRegExpReplace($testDomain, ":\d+$", "")
+    $testDomain = StringStripWS($testDomain, 3)
+
+    ; Gecerli alan adi karakterleri ve etiket yapisi
+    If StringLen($testDomain) > 253 Or _
+        Not StringRegExp($testDomain, _
+        "(?i)^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$") Then
+
+        MsgBox(16 + 8192, "Hata", "config.ini içindeki testdomain geçersiz: " & $testDomain & @CRLF & "roblox.com ile devam edilecek")
+        Return True
+    EndIf
+
+    ; Dosyalarin varligini kontrol et
+    If Not FileExists($shPath) Then
+        MsgBox(16 + 8192, "Hata", "blockcheck2.sh bulunamadi.")
+        Return False
+    EndIf
+
+    ; Mevcut yedegin ustune yazma
+    If FileExists($bakPath) Then
+        MsgBox(16 + 8192, "Hata", "Yedek dosya zaten mevcut:" & @CRLF & $bakPath & _
+            @CRLF & "Olası veri kaybını önlemek için işlem durduruldu.")
+        Return False
+    EndIf
+
+    ; Orijinal dosyayi yedekle
+    If Not FileMove($shPath, $bakPath) Then
+        MsgBox(16 + 8192, "Hata", "blockcheck2.sh yedeklenemedi.")
+        Return False
+    EndIf
+
+    Local $shContent = FileRead($bakPath)
+    If @error Then
+        FileMove($bakPath, $shPath)
+        MsgBox(16 + 8192, "Hata", "Yedek dosya okunamadi.")
+        Return False
+    EndIf
+
+    ; DOMAINS satirini degistir
+    Local $pattern = '(?m)^[ \t]*DOMAINS=\$\{DOMAINS:-[^\r\n]*'
+
+    If Not StringRegExp($shContent, $pattern) Then
+        FileMove($bakPath, $shPath)
+        MsgBox(16 + 8192, "Hata", "blockcheck2.sh içinde beklenen DOMAINS satırı bulunamadı.")
+        Return False
+    EndIf
+
+    $shContent = StringRegExpReplace($shContent, $pattern, _
+        'DOMAINS=${DOMAINS:-"' & $testDomain & '"}')
+
+    ; Yeni dosyayi olustur
+    Local $hFile = FileOpen($shPath, 2 + 256)
+    If $hFile = -1 Then
+        FileMove($bakPath, $shPath)
+        MsgBox(16 + 8192, "Hata", "Yeni blockcheck2.sh dosyasi olusturulamadi.")
+        Return False
+    EndIf
+
+    FileWrite($hFile, $shContent)
+    FileClose($hFile)
+
+    Return True
+EndFunc
+
+Func _RestoreTestDomain()
+    Local $shPath = @ScriptDir & "\bin\zapret\blockcheck\zapret2\blockcheck2.sh"
+    Local $bakPath = $shPath & ".bak"
+
+    If FileExists($bakPath) Then
+        If FileExists($shPath) Then FileDelete($shPath)
+
+        If Not FileMove($bakPath, $shPath) Then
+            MsgBox(16 + 8192, "Hata", "Orijinal blockcheck2.sh geri yuklenemedi!" & @CRLF & _
+                "Yedek dosya: " & $bakPath)
+            Return False
+        EndIf
+    EndIf
+
+    Return True
 EndFunc
 
 Func _CollectStrategiesFromText($sText, ByRef $aStrategies)
@@ -1498,11 +2138,50 @@ Func HasFirewallRule($fullPath)
 EndFunc
 
 Func _SetDNS_Localhost()
-    Local $psScript = "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up' -and $_.InterfaceDescription -notlike '*Virtual*' -and $_.InterfaceDescription -notlike '*Hyper-V*' -and $_.InterfaceDescription -notlike '*WSL*' -and $_.Name -notlike '*vEthernet*' -and $_.InterfaceDescription -notlike '*TAP*' -and $_.InterfaceDescription -notlike '*TUN*' -and $_.InterfaceDescription -notlike '*VPN*'} | Select-Object -First 1; "
-    $psScript &= "Set-DnsClientServerAddress -InterfaceAlias $adapter.Name -ServerAddresses '127.0.0.1', '::1'; "
-    $psScript &= "ipconfig /flushdns;"
+    Local $oWMI = ObjGet("winmgmts:\\.\root\cimv2")
+    If Not IsObj($oWMI) Then Return False
 
-    RunWait('powershell -NoProfile -Command "' & $psScript & '"', "", @SW_HIDE)
+    Local $oAdapters = $oWMI.ExecQuery( _
+        "SELECT * FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled=True")
+
+    If Not IsObj($oAdapters) Then Return False
+
+    Local $bSet = False
+
+    For $oAdapter In $oAdapters
+        If Not IsArray($oAdapter.DefaultIPGateway) Then ContinueLoop
+
+        Local $sDesc = String($oAdapter.Description)
+        If StringRegExp($sDesc, _
+            "(?i)Virtual|Hyper-V|WSL|TAP|TUN|VPN|VirtualBox|VMware|Loopback|WireGuard|Wintun") Then ContinueLoop
+
+        ; Dinamik arayüz adını bul
+        Local $sAdapterName = ""
+        Local $oNetAdapters = $oWMI.ExecQuery( _
+            "SELECT * FROM Win32_NetworkAdapter WHERE Index=" & $oAdapter.Index)
+
+        For $oNetAdapter In $oNetAdapters
+            $sAdapterName = $oNetAdapter.NetConnectionID
+            If Not IsString($sAdapterName) Then $sAdapterName = ""
+        Next
+
+        If $sAdapterName = "" Then ContinueLoop
+
+        ; IPv4 DNS: 127.0.0.1
+        Local $iIPv4 = RunWait(@ComSpec & ' /c netsh interface ipv4 set dnsservers name="' & _
+            $sAdapterName & '" source=static address=127.0.0.1 validate=no', "", @SW_HIDE)
+
+        ; IPv6 DNS: ::1
+        Local $iIPv6 = RunWait(@ComSpec & ' /c netsh interface ipv6 set dnsservers name="' & _
+            $sAdapterName & '" source=static address=::1 validate=no', "", @SW_HIDE)
+
+        If $iIPv4 = 0 And $iIPv6 = 0 Then $bSet = True
+    Next
+
+    ; DNS önbelleğini temizle
+    RunWait(@ComSpec & " /c ipconfig /flushdns", "", @SW_HIDE)
+
+    Return $bSet
 EndFunc
 
 Func _CheckDnscryptStatus()
