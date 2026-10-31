@@ -3,8 +3,8 @@
 #AutoIt3Wrapper_Icon=bin\zapret\zapret-winws\winws2.ico
 #AutoIt3Wrapper_UseX64=y
 #AutoIt3Wrapper_Res_Description=Zapret Windows Türkiye Lite
-#AutoIt3Wrapper_Res_Fileversion=4.7.0.0
-#AutoIt3Wrapper_Res_ProductVersion=4.7
+#AutoIt3Wrapper_Res_Fileversion=5.0.0.0
+#AutoIt3Wrapper_Res_ProductVersion=5.0
 #AutoIt3Wrapper_Res_LegalCopyright=Ali Mali
 #AutoIt3Wrapper_Res_Language=1055
 #EndRegion ;**** Directives created by AutoIt3Wrapper_GUI ****
@@ -17,8 +17,19 @@
 #include <ComboConstants.au3>
 #include <AutoItConstants.au3>
 #include <Constants.au3>
+#include <Date.au3>
+#include "bin\Includes\_SelfWatchDog.au3"
+#include "bin\Includes\GUIDarkTheme.au3"
+#include "bin\Includes\PMv2.au3"
 
-Global Const $PBS_MARQUEE = 0x08
+Global $version = "5.0" ; GitHub'daki tag ile karşılaştırılan uygulama sürümü
+
+; --- Güncelleme kontrolü ---
+Global $g_sUpdateResultFile = @TempDir & "\ZapretTurkey_Update_" & @AutoItPID & ".txt"
+Global $g_sUpdateScriptFile = @TempDir & "\ZapretTurkey_Update_" & @AutoItPID & ".ps1"
+Global $g_bUpdateCheckDone = False
+Global $g_hUpdateTimer = 0
+Global $darkMode = GetAppTheme()
 
 ; --- ZIP / TEMP KLASÖRÜ KONTROLÜ ---
 Local $currentDir = @ScriptDir
@@ -74,6 +85,11 @@ Global $currentEngine = "Zapret2"
 Global $isZapretRunning = False
 Global $zapretPID = 0
 Global $bServiceStoppedWarned = False
+Global $hGUI
+Global $lblStatusBg
+Global $lblStatusText
+Global $statusID
+
 
 ; Servis kurulum butonuna art arda tıklamayı engelleyen kilit.
 Global $bInstallServiceBusy = False
@@ -81,7 +97,7 @@ Global $hInstallServiceUnlockTimer = 0
 Global $bInstallServiceEnableAfterLock = True
 
 ; --- GUI Tasarımı ---
-Global $hGUI = GUICreate("Zapret Windows Türkiye v4.7 Lite", 400, 396)
+Global $hGUI = GUICreate("Zapret Windows Türkiye v5.0 Lite", 400, 396)
 GUISetBkColor(0xFFFFFF)
 
 ; --- Tepsi Menüsü ---
@@ -124,14 +140,14 @@ GUICtrlSetFont(-1, 9, 400, 0, "Segoe UI")
 GUICtrlSetState(-1, $GUI_DISABLE)
 
 ; STRATEJİ
-GUICtrlCreateLabel("Strateji:", 50, 212, 120, 20)
+GUICtrlCreateLabel("Strateji:", 50, 203, 120, 20)
 GUICtrlSetFont(-1, 9, 600, 0, "Segoe UI")
 Global $cmbStrategy = GUICtrlCreateCombo("Turk Telekom", 175, 200, 175, 25, $CBS_DROPDOWNLIST)
 GUICtrlSetFont(-1, 9, 400, 0, "Segoe UI")
 GUICtrlSetState(-1, $GUI_DISABLE)
 
 ; FİLTRE
-GUICtrlCreateLabel("Filtre:", 50, 247, 120, 20)
+GUICtrlCreateLabel("Filtre:", 50, 238, 120, 20)
 GUICtrlSetFont(-1, 9, 600, 0, "Segoe UI")
 Global $cmbFilter = GUICtrlCreateCombo("Kapalı (Tüm trafik)", 175, 235, 175, 25, $CBS_DROPDOWNLIST)
 Global $sFilterSelectionBeforeOOB = ""
@@ -169,7 +185,13 @@ GUICtrlSetColor(-1, 0xBDC3C7)
 Local $aCriticalButtons[5] = [$btnRunZapret, $btnInstallService, $cmbEngine, $cmbStrategy, $cmbFilter]
 Local $aOtherButtons[5] = [$btnInstallService, $btnRemoveService, $cmbEngine, $cmbStrategy, $cmbFilter]
 
+; --- DARK MODE ---
+SetAppTheme($darkMode)
+
 GUISetState(@SW_SHOW)
+
+; Güncelleme kontrolü ayrı süreçte başlar; GUI ağ yanıtını beklemez.
+_StartUpdateCheck()
 
 ; --- İLK YOLLARI VE STRATEJİ LİSTESİNİ DOĞRULA ---
 _UpdateEnginePaths(GUICtrlRead($cmbEngine))
@@ -194,14 +216,14 @@ While 1
         ; 2. TUR: Uygulama DNS değiştirdi ama hala zehirliyse (TT engelliyorsa)
         If $isDnsChangedByApp Then
             MsgBox(48 + 8192, "Kritik Uyarı", "Düz DNS değişikliği işe yaramadı, port 53'e müdahale var." & @CRLF & @CRLF & _
-                    "Düz DNS değişikliği işe yaramadı. YogaDNS gibi harici bir DNS istemcisi kullanmayı deneyebilirsiniz.")
+                    "Düz DNS değişikliği işe yaramadı. YogaDNS gibi harici bir DNS istemcisi kullanmayı deneyebilirsiniz.", 0, $hGUI)
             ExitLoop
         EndIf
 
         ; 1. TUR: Zehirlenme ilk kez saptandıysa soru sor
         Local $iAsk = MsgBox(36 + 8192, "DNS Zehirlenmesi Saptandı", _
                 "ISS tarafından DNS Zehirlenmesi saptandı!" & @CRLF & @CRLF & _
-                "Sistem DNS adresiniz Cloudflare (1.1.1.1 / 1.0.0.1) olarak ayarlansın mı?")
+                "Sistem DNS adresiniz Cloudflare (1.1.1.1 / 1.0.0.1) olarak ayarlansın mı?", 0, $hGUI)
 
         If $iAsk = 6 Then ; EVET
             GUICtrlSetData($lblStatusText, "DNS AYARLANIYOR...")
@@ -225,6 +247,26 @@ WEnd
 Local $hProcessTimer = TimerInit()
 
 While 1
+    ; Güncelleme kontrolünün sonucu geldiyse işle; ana GUI hiçbir ağ isteğini beklemez.
+    If Not $g_bUpdateCheckDone And $g_hUpdateTimer <> 0 And TimerDiff($g_hUpdateTimer) > 20000 Then
+        $g_bUpdateCheckDone = True
+        If FileExists($g_sUpdateResultFile) Then FileDelete($g_sUpdateResultFile)
+        If FileExists($g_sUpdateScriptFile) Then FileDelete($g_sUpdateScriptFile)
+    EndIf
+
+    If Not $g_bUpdateCheckDone And FileExists($g_sUpdateResultFile) Then
+        Local $sLatestVersion = StringStripWS(FileRead($g_sUpdateResultFile), 3)
+        FileDelete($g_sUpdateResultFile)
+        $g_bUpdateCheckDone = True
+        If FileExists($g_sUpdateScriptFile) Then FileDelete($g_sUpdateScriptFile)
+
+        If $sLatestVersion <> "" And _CompareVersions($version, $sLatestVersion) > 0 Then
+            Local $sConfigPath = @ScriptDir & "\config\config.ini"
+            Local $sSkippedVersion = IniRead($sConfigPath, "Settings", "skippedUpdate", "")
+            If $sSkippedVersion <> $sLatestVersion Then _ShowUpdateNotification($sLatestVersion)
+        EndIf
+    EndIf
+
     Local $nMsg = GUIGetMsg()
 
     ; Servis kurulumu sırasında kuyruğa alınan tıklamaları atla.
@@ -247,7 +289,7 @@ While 1
             If $isZapretRunning Then
                 StopWinws($btnRunZapret, $lblStatusText, $aOtherButtons)
                 MsgBox(16 + 8192, "Uyarı: Zapret Kapatıldı", "Zapret motoru beklenmedik bir şekilde kapandı veya dışarıdan sonlandırıldı!" & @CRLF & @CRLF & _
-                    "Sisteminizdeki Anti-Cheat yazılımları Zapret'i kapatmış olabilir.")
+                    "Sisteminizdeki Anti-Cheat yazılımları Zapret'i kapatmış olabilir.", 0, $hGUI)
             EndIf
             If GUICtrlRead($lblStatusText) = "SERVİS MODU AKTİF" Then
                 CheckServiceStatus($btnRunZapret, $lblStatusText, $aCriticalButtons, $cmbFilter)
@@ -299,7 +341,7 @@ While 1
             Local $isPoisonedAfterCleanup = CheckDnsPoisoningSilent()
             If Not $isPoisonedAfterCleanup Then CheckServiceStatus($btnRunZapret, $lblStatusText, $aCriticalButtons, $cmbFilter)
             _RefreshStrategyLabel()
-            MsgBox(64 + 8192, "Bilgi", "Zapret servisleri ve kalıntıları temizlendi. DNS ayarları otomatiğe (DHCP) alındı.")
+            MsgBox(64 + 8192, "Bilgi", "Zapret servisleri ve kalıntıları temizlendi. DNS ayarları otomatiğe (DHCP) alındı.", 0, $hGUI)
             If $isPoisonedAfterCleanup Then
                 _SetButtonsState($aCriticalButtons, $GUI_DISABLE)
                 GUICtrlSetData($lblStatusText, "DNS ZEHİRLENMESİ SAPTANDI!")
@@ -439,6 +481,193 @@ Func HasValidStrategy()
     Return ($sContent <> "")
 EndFunc
 
+; --- ASENKRON GÜNCELLEME KONTROLÜ ---
+Func _StartUpdateCheck()
+    Local $sConfigPath = @ScriptDir & "\config\config.ini"
+
+    ; Kullanıcı güncellemeleri kapattıysa kontrol başlatma.
+    If IniRead($sConfigPath, "Settings", "disableUpdate", "0") = "1" Then Return
+
+    ; Önce bu sürece ait eski dosyaları temizle.
+    If FileExists($g_sUpdateResultFile) Then FileDelete($g_sUpdateResultFile)
+    If FileExists($g_sUpdateScriptFile) Then FileDelete($g_sUpdateScriptFile)
+
+    ; GitHub isteği ayrı bir PowerShell sürecinde yapılır; GUI beklemez.
+    Local $sPowerShell = "$ErrorActionPreference = 'Stop'" & @CRLF & _
+            "try {" & @CRLF & _
+            "  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12" & @CRLF & _
+            "  $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/alimali54/zapret-win-turkey/releases/latest' -Headers @{ 'User-Agent' = 'Zapret-Windows-Turkey' } -TimeoutSec 12" & @CRLF & _
+            "  [IO.File]::WriteAllText($args[0], [string]$release.tag_name, (New-Object System.Text.UTF8Encoding($false)))" & @CRLF & _
+            "} catch {" & @CRLF & _
+            "  [IO.File]::WriteAllText($args[0], '', (New-Object System.Text.UTF8Encoding($false)))" & @CRLF & _
+            "}"
+
+    Local $hScript = FileOpen($g_sUpdateScriptFile, 2)
+    If $hScript = -1 Then Return
+    FileWrite($hScript, $sPowerShell)
+    FileClose($hScript)
+
+    Local $sCommand = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' & _
+            $g_sUpdateScriptFile & '" "' & $g_sUpdateResultFile & '"'
+    Local $iPID = Run($sCommand, @ScriptDir, @SW_HIDE)
+    If $iPID > 0 Then
+        $g_hUpdateTimer = TimerInit()
+    Else
+        FileDelete($g_sUpdateScriptFile)
+    EndIf
+EndFunc
+
+; -1: yerel sürüm daha yeni, 0: aynı, 1: GitHub sürümü daha yeni.
+Func _CompareVersions($sLocalVersion, $sRemoteVersion)
+    Local $aLocal = StringRegExp($sLocalVersion, "\d+", 3)
+    Local $aRemote = StringRegExp($sRemoteVersion, "\d+", 3)
+    If Not IsArray($aLocal) Or Not IsArray($aRemote) Then Return 0
+
+    Local $iMax = UBound($aLocal)
+    If UBound($aRemote) > $iMax Then $iMax = UBound($aRemote)
+
+    For $i = 0 To $iMax - 1
+        Local $iLocalPart = ($i < UBound($aLocal)) ? Number($aLocal[$i]) : 0
+        Local $iRemotePart = ($i < UBound($aRemote)) ? Number($aRemote[$i]) : 0
+        If $iRemotePart > $iLocalPart Then Return 1
+        If $iRemotePart < $iLocalPart Then Return -1
+    Next
+    Return 0
+EndFunc
+
+Func _ShowUpdateNotification($sLatestVersion)
+    Local $iChoice = _ShowUpdateChoiceDialog($sLatestVersion)
+    Local $sConfigPath = @ScriptDir & "\config\config.ini"
+
+    Switch $iChoice
+        Case 1 ; Evet: sürüm sayfasını aç
+            ShellExecute("https://github.com/alimali54/zapret-win-turkey/releases/latest")
+        Case 2 ; Bu sürümü atla
+            IniWrite($sConfigPath, "Settings", "skippedUpdate", $sLatestVersion)
+        Case 3 ; Güncellemeleri kapat
+            IniWrite($sConfigPath, "Settings", "disableUpdate", "1")
+    EndSwitch
+EndFunc
+
+; Dönüş değerleri: 1 = Evet, 2 = Bu sürümü atla, 3 = Güncellemeleri kapat.
+Func _ShowUpdateChoiceDialog($sLatestVersion)
+    Local $hDialog = GUICreate("Güncelleme Bulundu", 430, 160, -1, -1, BitOR($WS_CAPTION, $WS_SYSMENU), -1, $hGUI)
+    Local $iBg = $darkMode ? 0x202020 : 0xFFFFFF
+    Local $iText = $darkMode ? 0xE0E0E0 : 0x243247
+    GUISetBkColor($iBg, $hDialog)
+
+    GUICtrlCreateLabel("Yeni bir Zapret Windows Türkiye sürümü yayımlandı.", 18, 18, 394, 24)
+    GUICtrlSetFont(-1, 10, 600, 0, "Segoe UI")
+    GUICtrlSetColor(-1, $iText)
+
+    GUICtrlCreateLabel("Mevcut sürüm: v" & $version & "    |    Yeni sürüm: " & $sLatestVersion, 18, 52, 394, 22)
+    GUICtrlSetFont(-1, 9, 400, 0, "Segoe UI")
+    GUICtrlSetColor(-1, $iText)
+
+    Local $btnYes = GUICtrlCreateButton("Evet", 18, 112, 105, 34)
+    Local $btnSkip = GUICtrlCreateButton("Bu sürümü atla", 137, 112, 122, 34)
+    Local $btnDisable = GUICtrlCreateButton("Güncellemeleri kapat", 275, 112, 137, 34)
+    GUICtrlSetFont($btnYes, 9, 400, 0, "Segoe UI")
+    GUICtrlSetFont($btnSkip, 9, 400, 0, "Segoe UI")
+    GUICtrlSetFont($btnDisable, 9, 400, 0, "Segoe UI")
+
+    ; Ana pencereyi modal davranış için geçici devre dışı bırak.
+    GUISetState(@SW_DISABLE, $hGUI)
+
+    ; İkincil pencereye tema uygula; ana pencerenin subclass'larına dokunma.
+    _GUIDarkTheme_GUISetDarkTheme($hDialog, $darkMode)
+    Local $aDialogCtrls = _WinAPI_EnumChildWindows($hDialog, False)
+    If @error = 0 Then
+        For $i = 1 To $aDialogCtrls[0][0]
+            _GUIDarkTheme_GUICtrlSetDarkTheme($hDialog, $aDialogCtrls[$i][0], $darkMode)
+        Next
+    EndIf
+
+    GUISetState(@SW_SHOW, $hDialog)
+    Local $iResult = 0
+    While 1
+        Local $iMsg = GUIGetMsg()
+        Switch $iMsg
+            Case $btnYes
+                $iResult = 1
+                ExitLoop
+            Case $btnSkip
+                $iResult = 2
+                ExitLoop
+			Case $btnDisable
+				If _ConfirmDisableUpdates() = 1 Then
+					$iResult = 3
+					ExitLoop
+				EndIf
+            Case $GUI_EVENT_CLOSE
+                ExitLoop
+        EndSwitch
+        Sleep(20)
+    WEnd
+
+    GUIDelete($hDialog)
+    GUISetState(@SW_ENABLE, $hGUI)
+    WinActivate($hGUI)
+    Return $iResult
+EndFunc
+
+Func _ConfirmDisableUpdates()
+    Local $hConfirm = GUICreate("Güncelleme Bildirimleri", 430, 175, -1, -1, _
+            BitOR($WS_CAPTION, $WS_SYSMENU), -1, $hGUI)
+
+    Local $iBg = $darkMode ? 0x202020 : 0xFFFFFF
+    Local $iText = $darkMode ? 0xE0E0E0 : 0x243247
+
+    GUISetBkColor($iBg, $hConfirm)
+
+    GUICtrlCreateLabel( _
+        "Güncelleme bildirimlerini tekrar etkinleştirmek isterseniz:" & @CRLF & @CRLF & _
+        "config\config.ini dosyasındaki [Settings] bölümünde bulunan" & @CRLF & _
+        "disableUpdate satırını silebilir veya değerini 0 yapabilirsiniz." & @CRLF & @CRLF & _
+        "Güncelleme bildirimlerini kapatmak istiyor musunuz?", _
+        18, 15, 394, 105)
+
+    GUICtrlSetFont(-1, 9, 400, 0, "Segoe UI")
+    GUICtrlSetColor(-1, $iText)
+
+    Local $btnOK = GUICtrlCreateButton("Tamam", 205, 128, 95, 30)
+    Local $btnCancel = GUICtrlCreateButton("Vazgeç", 317, 128, 95, 30)
+
+    GUICtrlSetFont($btnOK, 9, 400, 0, "Segoe UI")
+    GUICtrlSetFont($btnCancel, 9, 400, 0, "Segoe UI")
+
+    _GUIDarkTheme_GUISetDarkTheme($hConfirm, $darkMode)
+
+    Local $aCtrls = _WinAPI_EnumChildWindows($hConfirm, False)
+    If @error = 0 Then
+        For $i = 1 To $aCtrls[0][0]
+            _GUIDarkTheme_GUICtrlSetDarkTheme($hConfirm, $aCtrls[$i][0], $darkMode)
+        Next
+    EndIf
+
+    GUISetState(@SW_SHOW, $hConfirm)
+
+    Local $iResult = 0
+
+    While 1
+        Local $iMsg = GUIGetMsg()
+
+        Switch $iMsg
+            Case $btnOK
+                $iResult = 1
+                ExitLoop
+
+            Case $btnCancel, $GUI_EVENT_CLOSE
+                ExitLoop
+        EndSwitch
+
+        Sleep(20)
+    WEnd
+
+    GUIDelete($hConfirm)
+    Return $iResult
+EndFunc
+
 Func _SaveConfigAndExit()
     Local $engineVal = ($currentEngine == "Zapret2") ? "0" : "1"
     Local $stratVal = GUICtrlRead($cmbStrategy)
@@ -485,7 +714,8 @@ EndFunc
 
 Func ExitApp()
     If $isZapretRunning Then StopWinws($btnRunZapret, $lblStatusText, $aOtherButtons)
-    Exit
+    GUIDelete($hGUI)
+	Exit
 EndFunc
 
 Func _SetButtonsState(ByRef $aBtnArray, $iState)
@@ -590,7 +820,7 @@ Func CheckServiceStatus($manualBtn, $statusID, $lockArray, $chkID)
             If Not $bServiceStoppedWarned Then
                 $bServiceStoppedWarned = True
                 MsgBox(16 + 8192, "Uyarı: Servis Durdurulmuş", "Zapret servisi sisteme yüklü ancak şu anda DURMUŞ durumda!" & @CRLF & @CRLF & _
-                        "Sisteminizdeki Anti-Cheat yazılımları Zapret'i tehdit olarak algılayıp kapatmış olabilir.")
+                        "Sisteminizdeki Anti-Cheat yazılımları Zapret'i tehdit olarak algılayıp kapatmış olabilir.", 0, $hGUI)
             EndIf
         EndIf
     Else
@@ -598,14 +828,19 @@ Func CheckServiceStatus($manualBtn, $statusID, $lockArray, $chkID)
         _SetButtonsState($lockArray, $GUI_ENABLE)
 
         GUICtrlSetData($statusID, "ÇALIŞMAYA HAZIR")
-        GUICtrlSetColor($statusID, 0x2C3E50)
+		If $darkMode Then
+			GUICtrlSetColor($statusID, 0xE0E0E0)
+		Else
+			GUICtrlSetColor($statusID, 0x2C3E50)
+		EndIf
     EndIf
+
     _UpdateFilterForStrategy()
 EndFunc
 
 Func StartWinws($ctrlID, $statusID, $aBtns)
     Local $activeStrategy = _GetActiveStrategyString()
-    If $activeStrategy = "" Then Return MsgBox(48 + 8192, "Hata", "Strateji dosyanız boş.")
+    If $activeStrategy = "" Then Return MsgBox(48 + 8192, "Hata", "Strateji dosyanız boş.", 0, $hGUI)
 
     Local $fullCommand = ""
 
@@ -660,10 +895,10 @@ Func StartWinws($ctrlID, $statusID, $aBtns)
             CheckServiceStatus($ctrlID, $statusID, $aBtns, $cmbFilter)
 
             MsgBox(16 + 8192, "Başlatma Hatası", "Zapret motoru başlatılamadı veya anında çöktü!" & @CRLF & @CRLF & _
-                    "Sisteminizdeki Anti-Cheat yazılımları Zapret'i tehdit olarak algılayıp kapatmış olabilir.")
+                    "Sisteminizdeki Anti-Cheat yazılımları Zapret'i tehdit olarak algılayıp kapatmış olabilir.", 0, $hGUI)
         EndIf
     Else
-        MsgBox(16 + 8192, "Dosya Bulunamadı", "WinWS exe dosyası bulunamadı veya çalıştırılamadı!")
+        MsgBox(16 + 8192, "Dosya Bulunamadı", "WinWS exe dosyası bulunamadı veya çalıştırılamadı!", 0, $hGUI)
     EndIf
 EndFunc
 
@@ -681,7 +916,7 @@ EndFunc
 
 Func InstallServiceClean($chkID)
     Local $activeStrategy = _GetActiveStrategyString()
-    If $activeStrategy = "" Then Return MsgBox(48 + 8192, "Hata", "Lütfen hazır stratejilerden birini seçin.")
+    If $activeStrategy = "" Then Return MsgBox(48 + 8192, "Hata", "Lütfen hazır stratejilerden birini seçin.", 0, $hGUI)
 
     Local $binArgs = ""
 
@@ -720,10 +955,54 @@ Func InstallServiceClean($chkID)
 
     If RunWait(@ComSpec & " /c sc create " & $serviceName & ' binPath= "' & $fullBinPath & '" start= auto', "", @SW_HIDE) = 0 Then
         RunWait(@ComSpec & " /c sc start " & $serviceName, "", @SW_HIDE)
-        MsgBox(64 + 8192, "Başarılı", "Seçilen profil servis olarak kuruldu.")
+        MsgBox(64 + 8192, "Başarılı", "Seçilen profil servis olarak kuruldu.", 0, $hGUI)
     EndIf
 EndFunc
 
 Func RemoveService()
     RunWait(@ComSpec & " /c sc stop " & $serviceName & " & sc delete " & $serviceName & " & sc stop WinDivert & sc delete WinDivert & sc stop WinDivert14 & sc delete WinDivert14 & sc stop monkey & sc delete monkey", "", @SW_HIDE)
+EndFunc
+
+Func SetAppTheme($bDark)
+    $darkMode = $bDark
+
+    If $darkMode Then
+        _GUIDarkTheme_ApplyDark($hGUI)
+
+        ; Üst durum paneli
+        GUICtrlSetBkColor($lblStatusBg, 0x2D2D30)
+        GUICtrlSetColor($lblStatusText, 0xF5A623)
+
+        ; Durum yazısı
+        GUICtrlSetColor($statusID, 0xE0E0E0)
+
+    Else
+		_GUIDarkTheme_ApplyLight($hGUI)
+        ; Üst durum paneli
+        GUICtrlSetBkColor($lblStatusBg, 0xF2F4F7)
+        GUICtrlSetColor($lblStatusText, 0xE67E22)
+
+        ; Durum yazısı
+        GUICtrlSetColor($statusID, 0x2C3E50)
+    EndIf
+EndFunc
+
+Func GetAppTheme()
+    Local $sConfig = @ScriptDir & "\config\config.ini"
+    Local $sDarkMode = IniRead($sConfig, "Settings", "darkmode", "")
+
+    ; Config ayarı varsa öncelik ver
+    If $sDarkMode = "0" Then Return False
+    If $sDarkMode = "1" Then Return True
+
+    ; Windows temasını kontrol et
+    Local $iTheme = RegRead( _
+        "HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", _
+        "AppsUseLightTheme" _
+    )
+
+    ; Kayıt defteri değeri yoksa varsayılan açık tema
+    If @error Or ($iTheme <> 0 And $iTheme <> 1) Then Return False
+
+    Return (Number($iTheme) = 0)
 EndFunc
