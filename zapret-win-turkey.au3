@@ -3,8 +3,8 @@
 #AutoIt3Wrapper_Icon=bin\zapret\zapret-winws\winws2.ico
 #AutoIt3Wrapper_UseX64=y
 #AutoIt3Wrapper_Res_Description=Zapret Multi-Engine Windows Türkiye - Zapret & Zapret2 Kontrol Aracı
-#AutoIt3Wrapper_Res_Fileversion=4.7.0.0
-#AutoIt3Wrapper_Res_ProductVersion=4.7
+#AutoIt3Wrapper_Res_Fileversion=5.0.0.0
+#AutoIt3Wrapper_Res_ProductVersion=5.0
 #AutoIt3Wrapper_Res_LegalCopyright=Ali Mali
 #AutoIt3Wrapper_Res_Language=1055
 #EndRegion ;**** Directives created by AutoIt3Wrapper_GUI ****
@@ -20,6 +20,25 @@
 #include <EditConstants.au3>
 #include <GuiListView.au3>
 #include <Constants.au3>
+#include "bin\Includes\_SelfWatchDog.au3"
+#include "bin\Includes\GUIDarkTheme.au3"
+#include "bin\Includes\PMv2.au3"
+
+Global $version = "5.0" ; GitHub'daki tag ile karşılaştırılan uygulama sürümü
+
+; --- Güncelleme kontrolü ---
+Global $g_sUpdateResultFile = @TempDir & "\ZapretTurkey_Update_" & @AutoItPID & ".txt"
+Global $g_sUpdateScriptFile = @TempDir & "\ZapretTurkey_Update_" & @AutoItPID & ".ps1"
+Global $g_bUpdateCheckDone = False
+Global $g_hUpdateTimer = 0
+
+; --- Asenkron DNSCrypt durum kontrolü ---
+Global $g_sDnscryptResultFile = @TempDir & "\ZapretTurkey_Dnscrypt_" & @AutoItPID & ".txt"
+Global $g_sDnscryptScriptFile = @TempDir & "\ZapretTurkey_Dnscrypt_" & @AutoItPID & ".ps1"
+Global $g_bDnscryptCheckDone = False
+Global $g_hDnscryptCheckTimer = 0
+
+Global $darkMode = GetAppTheme()
 
 ; --- ZIP / TEMP KLASÖRÜ KONTROLÜ ---
 Local $currentDir = @ScriptDir
@@ -83,6 +102,10 @@ Global $maraPID = 0
 Global $lanShareMethod = 0 ; 1 = go-pcap2socks, 2 = v2ray + maradns
 Global $bServiceStoppedWarned = False
 Global $strategyTestPID = 0
+Global $hGUI
+Global $lblStatusBg
+Global $lblStatusText
+Global $statusID
 
 ; Blockcheck butonuna art arda tıklanmasını engelleyen kilit.
 Global $bBlockcheckBusy = False
@@ -99,7 +122,7 @@ Global $hInstallServiceUnlockTimer = 0
 Global $bInstallServiceEnableAfterLock = True
 
 ; --- GUI Tasarımı ---
-Global $hGUI = GUICreate("Zapret Windows Türkiye v4.7", 400, 535)
+Global $hGUI = GUICreate("Zapret Windows Türkiye v5.0", 400, 535)
 GUISetBkColor(0xFFFFFF)
 
 ; --- Tepsi Menüsü ---
@@ -204,7 +227,14 @@ GUICtrlSetColor(-1, 0xBDC3C7)
 Local $aCriticalButtons[7] = [$btnRunZapret, $btnAnalyze, $btnInstallService, $cmbEngine, $cmbStrategy, $cmbFilter, $btnDnscrypt]
 Local $aOtherButtons[7] = [$btnAnalyze, $btnInstallService, $btnRemoveService, $cmbEngine, $cmbStrategy, $cmbFilter, $btnDnscrypt]
 
+
+; --- DARK MODE ---
+SetAppTheme($darkMode)
+
 GUISetState(@SW_SHOW)
+
+; Güncelleme kontrolü ayrı süreçte başlar; GUI ağ yanıtını beklemez.
+_StartUpdateCheck()
 
 ; --- İLK YOLLARI VE STRATEJİ LİSTESİNİ DOĞRULA ---
 _UpdateEnginePaths(GUICtrlRead($cmbEngine))
@@ -232,14 +262,14 @@ While 1
             MsgBox(48 + 8192, "Kritik Uyarı", "Düz DNS değişikliği işe yaramadı, port 53'e müdahale var." & @CRLF & @CRLF & _
                     "Yapabilecekleriniz şunlar:" & @CRLF & @CRLF & _
                     "1- Program içinden dnscrypt-proxy servisi kurmak" & @CRLF & @CRLF & _
-                    "2- YogaDNS gibi harici bir DNS client'i kullanmak")
+                    "2- YogaDNS gibi harici bir DNS client'i kullanmak", 0, $hGUI)
             ExitLoop
         EndIf
 
         ; 1. TUR: Zehirlenme ilk kez saptandıysa soru sor
         Local $iAsk = MsgBox(36 + 8192, "DNS Zehirlenmesi Saptandı", _
                 "ISS tarafından DNS Zehirlenmesi saptandı!" & @CRLF & @CRLF & _
-                "Sistem DNS adresiniz Cloudflare (1.1.1.1 / 1.0.0.1) olarak ayarlansın mı?")
+                "Sistem DNS adresiniz Cloudflare (1.1.1.1 / 1.0.0.1) olarak ayarlansın mı?", 0, $hGUI)
 
         If $iAsk = 6 Then ; EVET
             GUICtrlSetData($lblStatusText, "DNS AYARLANIYOR...")
@@ -264,10 +294,34 @@ WEnd
 ; --- Ana Döngü ---
 Local $hProcessTimer = TimerInit() ; ZAMANLAYICIYI BAŞLAT (Bunu While 1'in hemen üstüne koy)
 
-; --- AÇILIŞTA DNSCRYPT SERVİS DURUMUNU KONTROL ET ---
-_CheckDnscryptStatus()
+; DNSCrypt kontrolünü ayrı süreçte başlat; GUI ana döngüsü beklemez.
+_StartDnscryptStatusCheck()
 
 While 1
+	; DNSCrypt kontrolü tamamlandıysa sonucu yalnızca bir kez GUI'ye uygula.
+    If Not $g_bDnscryptCheckDone Then _PollDnscryptStatusCheck()
+
+	; Güncelleme kontrolünün sonucu geldiyse işle; ana GUI hiçbir ağ isteğini beklemez.
+    If Not $g_bUpdateCheckDone And $g_hUpdateTimer <> 0 And TimerDiff($g_hUpdateTimer) > 20000 Then
+        $g_bUpdateCheckDone = True
+        If FileExists($g_sUpdateResultFile) Then FileDelete($g_sUpdateResultFile)
+        If FileExists($g_sUpdateScriptFile) Then FileDelete($g_sUpdateScriptFile)
+    EndIf
+
+    If Not $g_bUpdateCheckDone And FileExists($g_sUpdateResultFile) Then
+        Local $sLatestVersion = StringStripWS(FileRead($g_sUpdateResultFile), 3)
+        FileDelete($g_sUpdateResultFile)
+        $g_bUpdateCheckDone = True
+        If FileExists($g_sUpdateScriptFile) Then FileDelete($g_sUpdateScriptFile)
+
+        If $sLatestVersion <> "" And _CompareVersions($version, $sLatestVersion) > 0 Then
+            Local $sConfigPath = @ScriptDir & "\config\config.ini"
+            Local $sSkippedVersion = IniRead($sConfigPath, "Settings", "skippedUpdate", "")
+            If $sSkippedVersion <> $sLatestVersion Then _ShowUpdateNotification($sLatestVersion)
+        EndIf
+    EndIf
+	;;;;;
+
     Local $nMsg = GUIGetMsg()
 
     ; DNSCrypt çalışırken kuyruğa alınan tıklamaları da atla.
@@ -334,7 +388,7 @@ While 1
 				StopWinws($btnRunZapret, $lblStatusText, $aOtherButtons)
 				; Kullanıcıya Fortnite ve Anti-Cheat uyarısını ver
 				MsgBox(16 + 8192, "Uyarı: Zapret Kapatıldı", "Zapret motoru beklenmedik bir şekilde çöktü veya dışarıdan sonlandırıldı!" & @CRLF & @CRLF & _
-                    "Sisteminizdeki Anti-Cheat yazılımları Zapret'i tehdit olarak algılayıp kapatmış olabilir.")
+                    "Sisteminizdeki Anti-Cheat yazılımları Zapret'i tehdit olarak algılayıp kapatmış olabilir.", 0, $hGUI)
 			EndIf
 
 			; 4. YENİ: Zapret ölmüşse VE arayüz hala "SERVİS MODU AKTİF" diyorsa (Servis Modu Çökme durumu)
@@ -380,7 +434,7 @@ While 1
                     "Önceki analizde bulunan stratejiler açılsın mı?" & @CRLF & @CRLF & _
                     "Evet: Önceki sonuçları aç" & @CRLF & _
                     "Hayır: Yeni analiz başlat" & @CRLF & _
-                    "İptal: Vazgeç")
+                    "İptal: Vazgeç", 0, $hGUI)
 
                 If $iPreviousChoice = 6 Then
                     Local $aPreviousStrategies[1] = [0]
@@ -388,7 +442,7 @@ While 1
                     If $aPreviousStrategies[0] > 0 Then
                         _ShowStrategyTestWindow($aPreviousStrategies)
                     Else
-                        MsgBox(48 + 8192, "Sonuç Bulunamadı", "Kayıtlı sonuç dosyası boş veya okunamadı. Yeni analiz başlatabilirsiniz.")
+                        MsgBox(48 + 8192, "Sonuç Bulunamadı", "Kayıtlı sonuç dosyası boş veya okunamadı. Yeni analiz başlatabilirsiniz.", 0, $hGUI)
                     EndIf
                     $bStartNewAnalysis = False
                 ElseIf $iPreviousChoice = 2 Then
@@ -401,7 +455,7 @@ While 1
                 If $currentEngine = "Zapret2" Then
 					Local $iConfirm = 1
 				Else
-					Local $iConfirm = MsgBox(33 + 8192, "Bilgi", "Analiz işlemi 5-10 dakika sürebilir." & @CRLF & "Lütfen bitene kadar bekleyin.")
+					Local $iConfirm = MsgBox(33 + 8192, "Bilgi", "Analiz işlemi 5-10 dakika sürebilir." & @CRLF & "Lütfen bitene kadar bekleyin.", 0, $hGUI)
 				EndIf
 
 				If $iConfirm = 1 Then
@@ -455,7 +509,7 @@ While 1
                 If Not FileExists(@SystemDir & "\Packet.dll") Then
                     MsgBox(8208, "Eksik Bileşen", "HATA: Sistemde Npcap sürücüsü bulunamadı!" & @CRLF & @CRLF & _
                             "go-pcap2socks motorunun çalışabilmesi için Npcap kurulmalıdır." & @CRLF & _
-                            "Lütfen npcap.com adresinden indirip kurun.")
+                            "Lütfen npcap.com adresinden indirip kurun.", 0, $hGUI)
                     ContinueLoop
                 EndIf
 
@@ -473,9 +527,9 @@ While 1
                     RunWait(@ComSpec & ' /c netsh advfirewall firewall delete rule name=all program="' & $targetPcapExe & '"', "", @SW_HIDE)
                     MsgBox(8256, "Güvenlik Duvarı İzni", "go-pcap2socks için ağ izni gerekiyor." & @CRLF & @CRLF & _
                             "1. Birazdan Windows Güvenlik Duvarı uyarısı gelecektir." & @CRLF & _
-                            "2. Gelen ekranda kutucukları işaretleyip 'Erişime izin ver' butonuna basın.")
+                            "2. Gelen ekranda kutucukları işaretleyip 'Erişime izin ver' butonuna basın.", 0, $hGUI)
                     Local $tmpPID = Run('"' & $targetPcapExe & '"', @ScriptDir & "\bin\go-pcap2socks", @SW_HIDE)
-                    MsgBox(8256, "Onay", "Güvenlik duvarı iznini onayladıysanız Tamam'a basın.")
+                    MsgBox(8256, "Onay", "Güvenlik duvarı iznini onayladıysanız Tamam'a basın.", 0, $hGUI)
                     If $tmpPID > 0 Then ProcessClose($tmpPID)
                     GUISetState(@SW_SHOW, $hSplash)
                 EndIf
@@ -488,7 +542,7 @@ While 1
                     GUIDelete($hSplash)
                     $pcapPID = 0
                     MsgBox(16 + 8192, "Başlatma Hatası", "HATA: go-pcap2socks başlatılamadı!" & @CRLF & @CRLF & _
-                            "Sanal ağ kartı oluşturan VPN vb. programları kapatıp tekrar deneyin.")
+                            "Sanal ağ kartı oluşturan VPN vb. programları kapatıp tekrar deneyin.", 0, $hGUI)
                     ContinueLoop
                 EndIf
                 GUIDelete($hSplash)
@@ -500,7 +554,7 @@ While 1
                         "• IP Aralığı: 172.24.2.10 - 172.24.2.255" & @CRLF & _
                         "• Ağ Geçidi (Gateway): 172.24.2.1" & @CRLF & _
                         "• Alt Ağ Maskesi (Maske): 255.255.0.0" & @CRLF & _
-                        "• DNS 1: 1.1.1.1" & @CRLF & "• DNS 2: 8.8.8.8")
+                        "• DNS 1: 1.1.1.1" & @CRLF & "• DNS 2: 8.8.8.8", 0, $hGUI)
             Else
                 _StopLanShareProcesses()
                 GUICtrlSetData($btnLanShare, "Ağdaki Cihazlarla Paylaş")
@@ -540,7 +594,7 @@ While 1
             Local $sProxyPath = $sProxyDir & "\dnscrypt-proxy.exe"
 
             If Not FileExists($sProxyPath) Then
-                MsgBox(16, "Hata", "DNSCrypt dosyası bulunamadı!" & @CRLF & $sProxyPath)
+                MsgBox(16, "Hata", "DNSCrypt dosyası bulunamadı!" & @CRLF & $sProxyPath, 0, $hGUI)
                 $hDnscryptUnlockTimer = TimerInit()
                 ContinueLoop
             EndIf
@@ -612,7 +666,7 @@ While 1
             $isPoisoned = CheckDnsPoisoningSilent()
             If Not $isPoisoned Then CheckServiceStatus($btnRunZapret, $lblStatusText, $aCriticalButtons, $cmbFilter)
             _RefreshStrategyLabel()
-            MsgBox(64 + 8192, "Bilgi", "WinDivert, Zapret, Dnscrypt temizlendi ve DNS ayarları otomatiğe (DHCP) alındı.")
+            MsgBox(64 + 8192, "Bilgi", "WinDivert, Zapret, Dnscrypt temizlendi ve DNS ayarları otomatiğe (DHCP) alındı.", 0, $hGUI)
 
 			If $isPoisoned Then
 				_SetButtonsState($aCriticalButtons, $GUI_DISABLE)
@@ -844,7 +898,7 @@ Func _ChooseLanShareMethod()
 
     Local $lblTitle = GUICtrlCreateLabel("Paylaşım yöntemini seç", 12, 12, 316, 24, $SS_CENTER)
     GUICtrlSetFont($lblTitle, 11, 700, 0, "Segoe UI")
-    GUICtrlSetColor($lblTitle, 0x243247)
+    GUICtrlSetColor($lblTitle, $darkMode ? 0xE0E0E0 : 0x243247)
 
     Local $radPcap = GUICtrlCreateRadio("go-pcap2socks", 28, 46, 140, 24)
     GUICtrlSetFont($radPcap, 10, 600, 0, "Segoe UI")
@@ -886,7 +940,25 @@ Func _ChooseLanShareMethod()
     GUISetState(@SW_DISABLE, $hGUI)
 
 
-    GUISetState(@SW_SHOW, $hChoice)
+	If $darkMode Then
+		_GUIDarkTheme_GUISetDarkTheme($hChoice, True)
+	Else
+		_GUIDarkTheme_GUISetDarkTheme($hChoice, False)
+	EndIf
+
+	Local $aCtrls = _WinAPI_EnumChildWindows($hChoice, False)
+	If @error = 0 Then
+		For $i = 1 To $aCtrls[0][0]
+			If $darkMode Then
+				_GUIDarkTheme_GUICtrlSetDarkTheme($hChoice, $aCtrls[$i][0], True)
+			Else
+				_GUIDarkTheme_GUICtrlSetDarkTheme($hChoice, $aCtrls[$i][0], False)
+			EndIf
+		Next
+	EndIf
+
+	GUISetState(@SW_SHOW, $hChoice)
+
     Local $iChoice = 0
     While 1
         Local $nChoice = GUIGetMsg()
@@ -940,7 +1012,26 @@ Func _ShowLanDeviceScan($hParent)
     _GUICtrlListView_SetColumnWidth(GUICtrlGetHandle($lvDevices), 1, 135)
     _GUICtrlListView_SetColumnWidth(GUICtrlGetHandle($lvDevices), 2, 255)
     Local $btnClose = GUICtrlCreateButton("Kapat", 422, 394, 112, 30)
-    GUISetState(@SW_SHOW, $hScan)
+
+	If $darkMode Then
+		_GUIDarkTheme_GUISetDarkTheme($hScan, True)
+	Else
+		_GUIDarkTheme_GUISetDarkTheme($hScan, False)
+	EndIf
+
+	Local $aCtrls = _WinAPI_EnumChildWindows($hScan, False)
+	If @error = 0 Then
+		For $i = 1 To $aCtrls[0][0]
+			If $darkMode Then
+				_GUIDarkTheme_GUICtrlSetDarkTheme($hScan, $aCtrls[$i][0], True)
+			Else
+				_GUIDarkTheme_GUICtrlSetDarkTheme($hScan, $aCtrls[$i][0], False)
+			EndIf
+		Next
+	EndIf
+
+	GUISetState(@SW_SHOW, $hScan)
+
     GUICtrlSetData($lblSummary, "PowerShell ile yerel alt ağdaki yanıt veren cihazlar aranıyor...")
     Local $sPsPath = @TempDir & "\zapret_lan_scan_" & @AutoItPID & ".ps1"
     Local $sPs = "" & _
@@ -1161,27 +1252,27 @@ Func _StartV2rayMaraDNS()
 
     If Not FileExists($sV2rayCmd) Or Not FileExists($sMaraCmd) Or Not FileExists($sZoneFile) Then
         MsgBox(16 + 8192, "Dosyalar Eksik", "v2ray + maradns başlatılamadı. Şu dosyaların varlığını kontrol et:" & @CRLF & _
-                $sV2rayCmd & @CRLF & $sMaraCmd & @CRLF & $sZoneFile)
+                $sV2rayCmd & @CRLF & $sMaraCmd & @CRLF & $sZoneFile, 0, $hGUI)
         Return False
     EndIf
 
     _StopV2rayMaraDNS()
     Local $sIP = _GetPhysicalIPv4()
     If $sIP = "" Or $sIP = "0.0.0.0" Then
-        MsgBox(16 + 8192, "IP Bulunamadı", "Bilgisayarın yerel IPv4 adresi bulunamadı.")
+        MsgBox(16 + 8192, "IP Bulunamadı", "Bilgisayarın yerel IPv4 adresi bulunamadı.", 0, $hGUI)
         Return False
     EndIf
 
     Local $hZone = FileOpen($sZoneFile, 0)
     If $hZone = -1 Then
-        MsgBox(16 + 8192, "Dosya Okunamadı", "MaraDNS zone dosyası okunamadı:" & @CRLF & $sZoneFile)
+        MsgBox(16 + 8192, "Dosya Okunamadı", "MaraDNS zone dosyası okunamadı:" & @CRLF & $sZoneFile, 0, $hGUI)
         Return False
     EndIf
     Local $sZoneText = FileRead($hZone)
     FileClose($hZone)
     Local $aZoneLines = StringSplit(StringStripCR($sZoneText), @LF, 2)
     If UBound($aZoneLines) < 2 Then
-        MsgBox(16 + 8192, "Zone Dosyası Hatalı", "zone-redirect-all.txt dosyasında beklenen satır yapısı bulunamadı.")
+        MsgBox(16 + 8192, "Zone Dosyası Hatalı", "zone-redirect-all.txt dosyasında beklenen satır yapısı bulunamadı.", 0, $hGUI)
         Return False
     EndIf
 
@@ -1195,7 +1286,7 @@ Func _StartV2rayMaraDNS()
     Next
     Local $hZoneOut = FileOpen($sZoneFile, 2)
     If $hZoneOut = -1 Then
-        MsgBox(16 + 8192, "Dosya Yazılamadı", "MaraDNS zone dosyası güncellenemedi.")
+        MsgBox(16 + 8192, "Dosya Yazılamadı", "MaraDNS zone dosyası güncellenemedi.", 0, $hGUI)
         Return False
     EndIf
     FileWrite($hZoneOut, $sNewZone)
@@ -1208,7 +1299,7 @@ Func _StartV2rayMaraDNS()
     Local $sMaraExe = $sMaraDir & "\maradns.exe"
     If Not FileExists($sV2rayExe) Or Not FileExists($sMaraExe) Then
         MsgBox(16 + 8192, "Dosyalar Eksik", "Güvenlik duvarı kontrolü için v2ray.exe ve maradns.exe dosyaları bulunamadı." & @CRLF & _
-                "Kontrol edilen yollar:" & @CRLF & $sV2rayExe & @CRLF & $sMaraExe)
+                "Kontrol edilen yollar:" & @CRLF & $sV2rayExe & @CRLF & $sMaraExe, 0, $hGUI)
         Return False
     EndIf
 
@@ -1225,9 +1316,9 @@ Func _StartV2rayMaraDNS()
                     RunWait(@ComSpec & ' /c netsh advfirewall firewall delete rule name=all program="' & $sV2rayExe & '"', "", @SW_HIDE)
                     MsgBox(8256, "Güvenlik Duvarı İzni", "v2ray için ağ izni gerekiyor." & @CRLF & @CRLF & _
                             "1. Birazdan Windows Güvenlik Duvarı uyarısı gelecektir." & @CRLF & _
-                            "2. Gelen ekranda kutucukları işaretleyip 'Erişime izin ver' butonuna basın.")
+                            "2. Gelen ekranda kutucukları işaretleyip 'Erişime izin ver' butonuna basın.", 0, $hGUI)
                     Local $tmpPID = Run('"' & $sV2rayCmd & '"', @ScriptDir & "\bin\v2ray", @SW_HIDE)
-                    MsgBox(8256, "Onay", "Güvenlik duvarı iznini onayladıysanız Tamam'a basın.")
+                    MsgBox(8256, "Onay", "Güvenlik duvarı iznini onayladıysanız Tamam'a basın.", 0, $hGUI)
                     If $tmpPID > 0 Then ProcessClose("v2ray.exe")
                     GUISetState(@SW_SHOW, $hFwSplash)
                 EndIf
@@ -1238,9 +1329,9 @@ Func _StartV2rayMaraDNS()
                     RunWait(@ComSpec & ' /c netsh advfirewall firewall delete rule name=all program="' & $sMaraExe & '"', "", @SW_HIDE)
                     MsgBox(8256, "Güvenlik Duvarı İzni", "maradns için ağ izni gerekiyor." & @CRLF & @CRLF & _
                             "1. Birazdan Windows Güvenlik Duvarı uyarısı gelecektir." & @CRLF & _
-                            "2. Gelen ekranda kutucukları işaretleyip 'Erişime izin ver' butonuna basın.")
+                            "2. Gelen ekranda kutucukları işaretleyip 'Erişime izin ver' butonuna basın.", 0, $hGUI)
                     Local $tmpPID = Run('"' & $sMaraCmd & '"', @ScriptDir & "\bin\maradns", @SW_HIDE)
-                    MsgBox(8256, "Onay", "Güvenlik duvarı iznini onayladıysanız Tamam'a basın.")
+                    MsgBox(8256, "Onay", "Güvenlik duvarı iznini onayladıysanız Tamam'a basın.", 0, $hGUI)
                     If $tmpPID > 0 Then ProcessClose("maradns.exe")
                     GUISetState(@SW_SHOW, $hFwSplash)
                 EndIf
@@ -1252,10 +1343,10 @@ Func _StartV2rayMaraDNS()
     Sleep(300)
 
     If Not ProcessExists("v2ray.exe") Or Not ProcessExists("maradns.exe") Then
-        MsgBox(48 + 8192, "Başlatma Kontrolü", "v2ray ve/veya maradns işlemi başlatılamadı.")
+        MsgBox(48 + 8192, "Başlatma Kontrolü", "v2ray ve/veya maradns işlemi başlatılamadı.", 0, $hGUI)
 		Return False
 	Else
-		MsgBox(64 + 8192, "v2ray & MaraDNS", "Ağdaki diğer cihazınızda DNS adresi olarak şu IP'yi girin:" & @CRLF & @CRLF & $sIP)
+		MsgBox(64 + 8192, "v2ray & MaraDNS", "Ağdaki diğer cihazınızda DNS adresi olarak şu IP'yi girin:" & @CRLF & @CRLF & $sIP, 0, $hGUI)
 		Return True
     EndIf
 
@@ -1313,6 +1404,7 @@ EndFunc
 Func ExitApp()
     If $isZapretRunning Then StopWinws($btnRunZapret, $lblStatusText, $aOtherButtons)
     _StopLanShareProcesses()
+	GUIDelete($hGUI)
     Exit
 EndFunc
 
@@ -1420,7 +1512,7 @@ Func CheckServiceStatus($manualBtn, $statusID, $lockArray, $chkID)
             If Not $bServiceStoppedWarned Then
                 $bServiceStoppedWarned = True
                 MsgBox(16 + 8192, "Uyarı: Servis Durdurulmuş", "Zapret servisi sisteme yüklü ancak şu anda DURMUŞ durumda!" & @CRLF & @CRLF & _
-                        "Sisteminizdeki Anti-Cheat yazılımları Zapret'i tehdit olarak algılayıp kapatmış olabilir.")
+                        "Sisteminizdeki Anti-Cheat yazılımları Zapret'i tehdit olarak algılayıp kapatmış olabilir.", 0, $hGUI)
             EndIf
         EndIf
     Else
@@ -1428,14 +1520,19 @@ Func CheckServiceStatus($manualBtn, $statusID, $lockArray, $chkID)
         _SetButtonsState($lockArray, $GUI_ENABLE)
 
         GUICtrlSetData($statusID, "ÇALIŞMAYA HAZIR")
-        GUICtrlSetColor($statusID, 0x2C3E50)
+		If $darkMode Then
+			GUICtrlSetColor($statusID, 0xE0E0E0)
+		Else
+			GUICtrlSetColor($statusID, 0x2C3E50)
+		EndIf
     EndIf
+	;Sleep(1)
     _UpdateFilterForStrategy()
 EndFunc
 
 Func StartWinws($ctrlID, $statusID, $aBtns)
     Local $activeStrategy = _GetActiveStrategyString()
-    If $activeStrategy = "" Then Return MsgBox(48 + 8192, "Hata", "Strateji bulunamadı. Önce analiz yapın.")
+    If $activeStrategy = "" Then Return MsgBox(48 + 8192, "Hata", "Strateji bulunamadı. Önce analiz yapın.", 0, $hGUI)
 
     Local $fullCommand = ""
 
@@ -1490,10 +1587,10 @@ Func StartWinws($ctrlID, $statusID, $aBtns)
             CheckServiceStatus($ctrlID, $statusID, $aBtns, $cmbFilter)
 
             MsgBox(16 + 8192, "Başlatma Hatası", "Zapret motoru başlatılamadı veya anında çöktü!" & @CRLF & @CRLF & _
-                    "Sisteminizdeki Anti-Cheat yazılımları Zapret'i tehdit olarak algılayıp kapatmış olabilir.")
+                    "Sisteminizdeki Anti-Cheat yazılımları Zapret'i tehdit olarak algılayıp kapatmış olabilir.", 0, $hGUI)
         EndIf
     Else
-        MsgBox(16 + 8192, "Dosya Bulunamadı", "WinWS exe dosyası bulunamadı veya çalıştırılamadı!")
+        MsgBox(16 + 8192, "Dosya Bulunamadı", "WinWS exe dosyası bulunamadı veya çalıştırılamadı!", 0, $hGUI)
     EndIf
 EndFunc
 
@@ -1511,7 +1608,7 @@ EndFunc
 
 Func InstallServiceClean($chkID)
     Local $activeStrategy = _GetActiveStrategyString()
-    If $activeStrategy = "" Then Return MsgBox(48 + 8192, "Hata", "Strateji bulunamadı. Önce analiz yapın.")
+    If $activeStrategy = "" Then Return MsgBox(48 + 8192, "Hata", "Strateji bulunamadı. Önce analiz yapın.", 0, $hGUI)
 
     Local $binArgs = ""
 
@@ -1550,7 +1647,7 @@ Func InstallServiceClean($chkID)
 
     If RunWait(@ComSpec & " /c sc create " & $serviceName & ' binPath= "' & $fullBinPath & '" start= auto', "", @SW_HIDE) = 0 Then
         RunWait(@ComSpec & " /c sc start " & $serviceName, "", @SW_HIDE)
-        MsgBox(64 + 8192, "Başarılı", "Seçilen profil servis olarak kuruldu.")
+        MsgBox(64 + 8192, "Başarılı", "Seçilen profil servis olarak kuruldu.", 0, $hGUI)
     EndIf
 EndFunc
 
@@ -1587,7 +1684,7 @@ Func RunBlockcheck($ctrlID)
     WEnd
     If $isNoBypassNeeded Then
         MsgBox(64 + 8192, "Bilgi: Zapret1 Analiz Tamamlandı", _
-                "İnternet hattınızda herhangi bir DPI / Sansür kısıtlaması saptanmadı!")
+                "İnternet hattınızda herhangi bir DPI / Sansür kısıtlaması saptanmadı!", 0, $hGUI)
     Else
         ExtractSummary($logPath)
     EndIf
@@ -1614,10 +1711,10 @@ Func ExtractSummary($filePath)
         If $hFile <> -1 Then
             FileWrite($hFile, $sFormatted)
             FileClose($hFile)
-            MsgBox(64 + 8192, "Başarılı", "Analiz tamamlandı. Zapret1 için strateji ayıklandı.")
+            MsgBox(64 + 8192, "Başarılı", "Analiz tamamlandı. Zapret1 için strateji ayıklandı.", 0, $hGUI)
         EndIf
     Else
-        MsgBox(16 + 8192, "Başarısız", "Strateji bulunamadı.")
+        MsgBox(16 + 8192, "Başarısız", "Strateji bulunamadı.", 0, $hGUI)
     EndIf
 EndFunc
 
@@ -1694,6 +1791,24 @@ Func RunBlockcheck2($ctrlID)
     Local $lblScanCount = GUICtrlCreateLabel("Bulunan strateji: 0", 18, 80, 324, 22, $SS_CENTER)
     GUICtrlSetFont($lblScanCount, 10, 600, 0, "Segoe UI")
     Local $btnStopScan = GUICtrlCreateButton("Analizi Durdur", 95, 115, 170, 32)
+
+	If $darkMode Then
+		_GUIDarkTheme_GUISetDarkTheme($hScanGUI, True)
+	Else
+		_GUIDarkTheme_GUISetDarkTheme($hScanGUI, False)
+	EndIf
+
+	Local $aCtrls = _WinAPI_EnumChildWindows($hScanGUI, False)
+	If @error = 0 Then
+		For $i = 1 To $aCtrls[0][0]
+			If $darkMode Then
+				_GUIDarkTheme_GUICtrlSetDarkTheme($hScanGUI, $aCtrls[$i][0], True)
+			Else
+				_GUIDarkTheme_GUICtrlSetDarkTheme($hScanGUI, $aCtrls[$i][0], False)
+			EndIf
+		Next
+	EndIf
+
     GUISetState(@SW_SHOW, $hScanGUI)
 
     Local $bashPath = @ScriptDir & "\bin\zapret\cygwin\bin\bash.exe"
@@ -1705,7 +1820,7 @@ Func RunBlockcheck2($ctrlID)
         GUIDelete($hScanGUI)
         GUISetState(@SW_ENABLE, $hGUI)
         GUISetState(@SW_SHOW, $hGUI)
-        MsgBox(16 + 8192, "Analiz Başlatılamadı", "Blockcheck2 süreci başlatılamadı.")
+        MsgBox(16 + 8192, "Analiz Başlatılamadı", "Blockcheck2 süreci başlatılamadı.", 0, $hGUI)
         Return
     EndIf
 
@@ -1768,7 +1883,7 @@ Func RunBlockcheck2($ctrlID)
     If $aStrategies[0] > 0 Then
         If Not _SaveBlockcheckResults($aStrategies) Then
             MsgBox(48 + 8192, "Sonuçlar Kaydedilemedi", _
-                "Stratejiler bu oturumda kullanılabilir ancak sonuç dosyasına kaydedilemedi:" & @CRLF & _BlockcheckResultsPath())
+                "Stratejiler bu oturumda kullanılabilir ancak sonuç dosyasına kaydedilemedi:" & @CRLF & _BlockcheckResultsPath(), 0, $hGUI)
         EndIf
     EndIf
 
@@ -1787,13 +1902,13 @@ Func RunBlockcheck2($ctrlID)
 
 	If $isNoBypassNeeded Then
         MsgBox(64 + 8192, "Bilgi: Zapret2 Analiz Tamamlandı", _
-            "İnternet hattınızda herhangi bir DPI / sansür kısıtlaması saptanmadı.")
+            "İnternet hattınızda herhangi bir DPI / sansür kısıtlaması saptanmadı.", 0, $hGUI)
 	ElseIf $aStrategies[0] > 0 Then
         _ShowStrategyTestWindow($aStrategies, True)
     ElseIf $bUserStopped Then
-        MsgBox(48 + 8192, "Analiz Durduruldu", "Analiz durduruldu. Kullanılabilir strateji bulunamadı.")
+        MsgBox(48 + 8192, "Analiz Durduruldu", "Analiz durduruldu. Kullanılabilir strateji bulunamadı.", 0, $hGUI)
     Else
-        MsgBox(16 + 8192, "Başarısız", "Analiz tamamlandı ancak kullanılabilir strateji bulunamadı.")
+        MsgBox(16 + 8192, "Başarısız", "Analiz tamamlandı ancak kullanılabilir strateji bulunamadı.", 0, $hGUI)
     EndIf
 
     GUISetState(@SW_ENABLE, $hGUI)
@@ -1826,33 +1941,33 @@ Func _PrepareTestDomain()
         Not StringRegExp($testDomain, _
         "(?i)^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$") Then
 
-        MsgBox(16 + 8192, "Hata", "config.ini içindeki testdomain geçersiz: " & $testDomain & @CRLF & "roblox.com ile devam edilecek")
+        MsgBox(16 + 8192, "Hata", "config.ini içindeki testdomain geçersiz: " & $testDomain & @CRLF & "roblox.com ile devam edilecek", 0, $hGUI)
         Return True
     EndIf
 
     ; Dosyalarin varligini kontrol et
     If Not FileExists($shPath) Then
-        MsgBox(16 + 8192, "Hata", "blockcheck2.sh bulunamadi.")
+        MsgBox(16 + 8192, "Hata", "blockcheck2.sh bulunamadi.", 0, $hGUI)
         Return False
     EndIf
 
     ; Mevcut yedegin ustune yazma
     If FileExists($bakPath) Then
         MsgBox(16 + 8192, "Hata", "Yedek dosya zaten mevcut:" & @CRLF & $bakPath & _
-            @CRLF & "Olası veri kaybını önlemek için işlem durduruldu.")
+            @CRLF & "Olası veri kaybını önlemek için işlem durduruldu.", 0, $hGUI)
         Return False
     EndIf
 
     ; Orijinal dosyayi yedekle
     If Not FileMove($shPath, $bakPath) Then
-        MsgBox(16 + 8192, "Hata", "blockcheck2.sh yedeklenemedi.")
+        MsgBox(16 + 8192, "Hata", "blockcheck2.sh yedeklenemedi.", 0, $hGUI)
         Return False
     EndIf
 
     Local $shContent = FileRead($bakPath)
     If @error Then
         FileMove($bakPath, $shPath)
-        MsgBox(16 + 8192, "Hata", "Yedek dosya okunamadi.")
+        MsgBox(16 + 8192, "Hata", "Yedek dosya okunamadi.", 0, $hGUI)
         Return False
     EndIf
 
@@ -1861,7 +1976,7 @@ Func _PrepareTestDomain()
 
     If Not StringRegExp($shContent, $pattern) Then
         FileMove($bakPath, $shPath)
-        MsgBox(16 + 8192, "Hata", "blockcheck2.sh içinde beklenen DOMAINS satırı bulunamadı.")
+        MsgBox(16 + 8192, "Hata", "blockcheck2.sh içinde beklenen DOMAINS satırı bulunamadı.", 0, $hGUI)
         Return False
     EndIf
 
@@ -1872,7 +1987,7 @@ Func _PrepareTestDomain()
     Local $hFile = FileOpen($shPath, 2 + 256)
     If $hFile = -1 Then
         FileMove($bakPath, $shPath)
-        MsgBox(16 + 8192, "Hata", "Yeni blockcheck2.sh dosyasi olusturulamadi.")
+        MsgBox(16 + 8192, "Hata", "Yeni blockcheck2.sh dosyasi olusturulamadi.", 0, $hGUI)
         Return False
     EndIf
 
@@ -1891,7 +2006,7 @@ Func _RestoreTestDomain()
 
         If Not FileMove($bakPath, $shPath) Then
             MsgBox(16 + 8192, "Hata", "Orijinal blockcheck2.sh geri yuklenemedi!" & @CRLF & _
-                "Yedek dosya: " & $bakPath)
+                "Yedek dosya: " & $bakPath, 0, $hGUI)
             Return False
         EndIf
     EndIf
@@ -1967,7 +2082,25 @@ Func _ShowStrategyTestWindow(ByRef $aStrategies, $bMainAlreadyDisabled = False)
     Local $btnSaveStrategy = GUICtrlCreateButton("Stratejiyi Kaydet", 245, 258, 130, 34)
     Local $btnCloseTest = GUICtrlCreateButton("Kapat", 385, 258, 100, 34)
     Local $bStrategyTestRunning = False
-    GUISetState(@SW_SHOW, $hTestGUI)
+
+	If $darkMode Then
+		_GUIDarkTheme_GUISetDarkTheme($hTestGUI, True)
+	Else
+		_GUIDarkTheme_GUISetDarkTheme($hTestGUI, False)
+	EndIf
+
+	Local $aCtrls = _WinAPI_EnumChildWindows($hTestGUI, False)
+	If @error = 0 Then
+		For $i = 1 To $aCtrls[0][0]
+			If $darkMode Then
+				_GUIDarkTheme_GUICtrlSetDarkTheme($hTestGUI, $aCtrls[$i][0], True)
+			Else
+				_GUIDarkTheme_GUICtrlSetDarkTheme($hTestGUI, $aCtrls[$i][0], False)
+			EndIf
+		Next
+	EndIf
+
+	GUISetState(@SW_SHOW, $hTestGUI)
 
     Local $bDone = False
     Local $iSelected = 1
@@ -2024,14 +2157,14 @@ Func _ShowStrategyTestWindow(ByRef $aStrategies, $bMainAlreadyDisabled = False)
                 If $iSelected >= 1 And $iSelected <= $aStrategies[0] Then
                     Local $hStore = FileOpen($strategyFile, 2)
                     If $hStore = -1 Then
-                        MsgBox(16 + 8192, "Kayıt Hatası", "Strateji dosyasına yazılamadı:" & @CRLF & $strategyFile)
+                        MsgBox(16 + 8192, "Kayıt Hatası", "Strateji dosyasına yazılamadı:" & @CRLF & $strategyFile, 0, $hGUI)
                     Else
                         FileWrite($hStore, $aStrategies[$iSelected])
                         FileClose($hStore)
                         ; Analiz Sonucu seçiliyken kaydedilen yeni stratejiye göre ana filtre alanını anında güncelle.
                         _UpdateFilterForStrategy()
                         _StopStrategyTest()
-                        MsgBox(64 + 8192, "Strateji Kaydedildi", "Seçilen strateji kaydedildi. Ana menüden Analiz Sonucu seçip Zapret'i başlatabilirsiniz.")
+                        MsgBox(64 + 8192, "Strateji Kaydedildi", "Seçilen strateji kaydedildi. Ana menüden Analiz Sonucu seçip Zapret'i başlatabilirsiniz.", 0, $hGUI)
                         $bDone = True
                     EndIf
                 EndIf
@@ -2184,29 +2317,294 @@ Func _SetDNS_Localhost()
     Return $bSet
 EndFunc
 
-Func _CheckDnscryptStatus()
-    Local $sProxyName = "dnscrypt-proxy"
+Func _StartDnscryptStatusCheck()
+    If FileExists($g_sDnscryptResultFile) Then FileDelete($g_sDnscryptResultFile)
+    If FileExists($g_sDnscryptScriptFile) Then FileDelete($g_sDnscryptScriptFile)
 
-    ; 1. Windows Servisi çalışıyor mu kontrol et
-    Local $iPid = Run(@ComSpec & " /c sc query " & $sProxyName, "", @SW_HIDE, $STDOUT_CHILD)
-    ProcessWaitClose($iPid)
-    Local $sOutput = StdoutRead($iPid)
+    ; Servis ve aktif fiziksel adaptör DNS adresini arka planda kontrol et.
+    Local $sPowerShell = "$ErrorActionPreference = 'SilentlyContinue'" & @CRLF & _
+            "$serviceOutput = (& sc.exe query dnscrypt-proxy 2>&1 | Out-String)" & @CRLF & _
+            "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up' -and $_.InterfaceDescription -notlike '*Virtual*' -and $_.InterfaceDescription -notlike '*Hyper-V*' -and $_.InterfaceDescription -notlike '*WSL*' -and $_.Name -notlike '*vEthernet*' -and $_.InterfaceDescription -notlike '*TAP*' -and $_.InterfaceDescription -notlike '*TUN*' -and $_.InterfaceDescription -notlike '*VPN*'} | Select-Object -First 1" & @CRLF & _
+            "$dnsOutput = ''" & @CRLF & _
+            "if ($adapter) { $dnsOutput = (Get-DnsClientServerAddress -InterfaceAlias $adapter.Name).ServerAddresses -join ',' }" & @CRLF & _
+            "if ($serviceOutput -match 'RUNNING' -and $dnsOutput -match '127\.0\.0\.1') { $result = '1' } else { $result = '0' }" & @CRLF & _
+            "[IO.File]::WriteAllText($args[0], $result, (New-Object System.Text.UTF8Encoding($false)))"
 
-    ; 2. Aktif DNS adresi 127.0.0.1 mi kontrol et
-    Local $psScript = "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up' -and $_.InterfaceDescription -notlike '*Virtual*' -and $_.InterfaceDescription -notlike '*Hyper-V*' -and $_.InterfaceDescription -notlike '*WSL*' -and $_.Name -notlike '*vEthernet*' -and $_.InterfaceDescription -notlike '*TAP*' -and $_.InterfaceDescription -notlike '*TUN*' -and $_.InterfaceDescription -notlike '*VPN*'} | Select-Object -First 1; "
-    $psScript &= "if ($adapter) { (Get-DnsClientServerAddress -InterfaceAlias $adapter.Name).ServerAddresses -join ',' }"
-    Local $iPidDNS = Run('powershell -NoProfile -Command "' & $psScript & '"', "", @SW_HIDE, $STDOUT_CHILD)
-    ProcessWaitClose($iPidDNS)
-    Local $sDnsOut = StdoutRead($iPidDNS)
+    Local $hScript = FileOpen($g_sDnscryptScriptFile, 2)
+    If $hScript = -1 Then
+        $g_bDnscryptCheckDone = True
+        Return
+    EndIf
+    FileWrite($hScript, $sPowerShell)
+    FileClose($hScript)
 
-    If StringInStr($sOutput, "RUNNING") And StringInStr($sDnsOut, "127.0.0.1") Then
-        GUICtrlSetData($btnDnscrypt, "[ ✓ ] Dnscrypt-proxy Aktif / Kaldır")
-        IniWrite($iniPath, "Settings", "DnscryptInstalled", "1")
+    Local $sCommand = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' & _
+            $g_sDnscryptScriptFile & '" "' & $g_sDnscryptResultFile & '"'
+    Local $iPID = Run($sCommand, @ScriptDir, @SW_HIDE)
+
+    If $iPID > 0 Then
+        $g_hDnscryptCheckTimer = TimerInit()
     Else
-        GUICtrlSetData($btnDnscrypt, "Dnscrypt-proxy servisi kur")
-        IniWrite($iniPath, "Settings", "DnscryptInstalled", "0")
+        FileDelete($g_sDnscryptScriptFile)
+        $g_bDnscryptCheckDone = True
+    EndIf
+EndFunc
+
+Func _PollDnscryptStatusCheck()
+    ; Sonuç dosyası hazırsa GUI ve INI'yi güncelle.
+    If FileExists($g_sDnscryptResultFile) Then
+        Local $sResult = StringStripWS(FileRead($g_sDnscryptResultFile), 3)
+        FileDelete($g_sDnscryptResultFile)
+        If FileExists($g_sDnscryptScriptFile) Then FileDelete($g_sDnscryptScriptFile)
+
+        If $sResult = "1" Then
+            GUICtrlSetData($btnDnscrypt, "[ ✓ ] Dnscrypt-proxy Aktif / Kaldır")
+            IniWrite($iniPath, "Settings", "DnscryptInstalled", "1")
+        ElseIf $sResult = "0" Then
+            GUICtrlSetData($btnDnscrypt, "Dnscrypt-proxy servisi kur")
+            IniWrite($iniPath, "Settings", "DnscryptInstalled", "0")
+        EndIf
+
+        GUICtrlSetState($btnDnscrypt, $GUI_ENABLE)
+        $g_bDnscryptCheckDone = True
+        Return
     EndIf
 
-    ; Açılışta butonun disabled kalmaması için her kontrol bitiminde açıyoruz
-    GUICtrlSetState($btnDnscrypt, $GUI_ENABLE)
+    ; Beklenmeyen gecikmede uygulamayı bekletme; mevcut INI metni korunur.
+    If $g_hDnscryptCheckTimer <> 0 And TimerDiff($g_hDnscryptCheckTimer) > 15000 Then
+        If FileExists($g_sDnscryptScriptFile) Then FileDelete($g_sDnscryptScriptFile)
+        GUICtrlSetState($btnDnscrypt, $GUI_ENABLE)
+        $g_bDnscryptCheckDone = True
+    EndIf
+EndFunc
+
+Func SetAppTheme($bDark)
+    $darkMode = $bDark
+
+    If $darkMode Then
+        _GUIDarkTheme_ApplyDark($hGUI)
+
+        ; Üst durum paneli
+        GUICtrlSetBkColor($lblStatusBg, 0x2D2D30)
+        GUICtrlSetColor($lblStatusText, 0xF5A623)
+
+        ; Durum yazısı
+        GUICtrlSetColor($statusID, 0xE0E0E0)
+
+    Else
+		_GUIDarkTheme_ApplyLight($hGUI)
+        ; Üst durum paneli
+        GUICtrlSetBkColor($lblStatusBg, 0xF2F4F7)
+        GUICtrlSetColor($lblStatusText, 0xE67E22)
+
+        ; Durum yazısı
+        GUICtrlSetColor($statusID, 0x2C3E50)
+    EndIf
+EndFunc
+
+Func GetAppTheme()
+    Local $sConfig = @ScriptDir & "\config\config.ini"
+    Local $sDarkMode = IniRead($sConfig, "Settings", "darkmode", "")
+
+    ; Config ayarı varsa öncelik ver
+    If $sDarkMode = "0" Then Return False
+    If $sDarkMode = "1" Then Return True
+
+    ; Windows temasını kontrol et
+    Local $iTheme = RegRead( _
+        "HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", _
+        "AppsUseLightTheme" _
+    )
+
+    ; Kayıt defteri değeri yoksa varsayılan açık tema
+    If @error Or ($iTheme <> 0 And $iTheme <> 1) Then Return False
+
+    Return (Number($iTheme) = 0)
+EndFunc
+
+; --- ASENKRON GÜNCELLEME KONTROLÜ ---
+Func _StartUpdateCheck()
+    Local $sConfigPath = @ScriptDir & "\config\config.ini"
+
+    ; Kullanıcı güncellemeleri kapattıysa kontrol başlatma.
+    If IniRead($sConfigPath, "Settings", "disableUpdate", "0") = "1" Then Return
+
+    ; Önce bu sürece ait eski dosyaları temizle.
+    If FileExists($g_sUpdateResultFile) Then FileDelete($g_sUpdateResultFile)
+    If FileExists($g_sUpdateScriptFile) Then FileDelete($g_sUpdateScriptFile)
+
+    ; GitHub isteği ayrı bir PowerShell sürecinde yapılır; GUI beklemez.
+    Local $sPowerShell = "$ErrorActionPreference = 'Stop'" & @CRLF & _
+            "try {" & @CRLF & _
+            "  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12" & @CRLF & _
+            "  $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/alimali54/zapret-win-turkey/releases/latest' -Headers @{ 'User-Agent' = 'Zapret-Windows-Turkey' } -TimeoutSec 12" & @CRLF & _
+            "  [IO.File]::WriteAllText($args[0], [string]$release.tag_name, (New-Object System.Text.UTF8Encoding($false)))" & @CRLF & _
+            "} catch {" & @CRLF & _
+            "  [IO.File]::WriteAllText($args[0], '', (New-Object System.Text.UTF8Encoding($false)))" & @CRLF & _
+            "}"
+
+    Local $hScript = FileOpen($g_sUpdateScriptFile, 2)
+    If $hScript = -1 Then Return
+    FileWrite($hScript, $sPowerShell)
+    FileClose($hScript)
+
+    Local $sCommand = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' & _
+            $g_sUpdateScriptFile & '" "' & $g_sUpdateResultFile & '"'
+    Local $iPID = Run($sCommand, @ScriptDir, @SW_HIDE)
+    If $iPID > 0 Then
+        $g_hUpdateTimer = TimerInit()
+    Else
+        FileDelete($g_sUpdateScriptFile)
+    EndIf
+EndFunc
+
+; -1: yerel sürüm daha yeni, 0: aynı, 1: GitHub sürümü daha yeni.
+Func _CompareVersions($sLocalVersion, $sRemoteVersion)
+    Local $aLocal = StringRegExp($sLocalVersion, "\d+", 3)
+    Local $aRemote = StringRegExp($sRemoteVersion, "\d+", 3)
+    If Not IsArray($aLocal) Or Not IsArray($aRemote) Then Return 0
+
+    Local $iMax = UBound($aLocal)
+    If UBound($aRemote) > $iMax Then $iMax = UBound($aRemote)
+
+    For $i = 0 To $iMax - 1
+        Local $iLocalPart = ($i < UBound($aLocal)) ? Number($aLocal[$i]) : 0
+        Local $iRemotePart = ($i < UBound($aRemote)) ? Number($aRemote[$i]) : 0
+        If $iRemotePart > $iLocalPart Then Return 1
+        If $iRemotePart < $iLocalPart Then Return -1
+    Next
+    Return 0
+EndFunc
+
+Func _ShowUpdateNotification($sLatestVersion)
+    Local $iChoice = _ShowUpdateChoiceDialog($sLatestVersion)
+    Local $sConfigPath = @ScriptDir & "\config\config.ini"
+
+    Switch $iChoice
+        Case 1 ; Evet: sürüm sayfasını aç
+            ShellExecute("https://github.com/alimali54/zapret-win-turkey/releases/latest")
+        Case 2 ; Bu sürümü atla
+            IniWrite($sConfigPath, "Settings", "skippedUpdate", $sLatestVersion)
+        Case 3 ; Güncellemeleri kapat
+            IniWrite($sConfigPath, "Settings", "disableUpdate", "1")
+    EndSwitch
+EndFunc
+
+; Dönüş değerleri: 1 = Evet, 2 = Bu sürümü atla, 3 = Güncellemeleri kapat.
+Func _ShowUpdateChoiceDialog($sLatestVersion)
+    Local $hDialog = GUICreate("Güncelleme Bulundu", 430, 160, -1, -1, BitOR($WS_CAPTION, $WS_SYSMENU), -1, $hGUI)
+    Local $iBg = $darkMode ? 0x202020 : 0xFFFFFF
+    Local $iText = $darkMode ? 0xE0E0E0 : 0x243247
+    GUISetBkColor($iBg, $hDialog)
+
+    GUICtrlCreateLabel("Yeni bir Zapret Windows Türkiye sürümü yayımlandı.", 18, 18, 394, 24)
+    GUICtrlSetFont(-1, 10, 600, 0, "Segoe UI")
+    GUICtrlSetColor(-1, $iText)
+
+    GUICtrlCreateLabel("Mevcut sürüm: v" & $version & "    |    Yeni sürüm: " & $sLatestVersion, 18, 52, 394, 22)
+    GUICtrlSetFont(-1, 9, 400, 0, "Segoe UI")
+    GUICtrlSetColor(-1, $iText)
+
+    Local $btnYes = GUICtrlCreateButton("Evet", 18, 112, 105, 34)
+    Local $btnSkip = GUICtrlCreateButton("Bu sürümü atla", 137, 112, 122, 34)
+    Local $btnDisable = GUICtrlCreateButton("Güncellemeleri kapat", 275, 112, 137, 34)
+    GUICtrlSetFont($btnYes, 9, 400, 0, "Segoe UI")
+    GUICtrlSetFont($btnSkip, 9, 400, 0, "Segoe UI")
+    GUICtrlSetFont($btnDisable, 9, 400, 0, "Segoe UI")
+
+    ; Ana pencereyi modal davranış için geçici devre dışı bırak.
+    GUISetState(@SW_DISABLE, $hGUI)
+
+    ; İkincil pencereye tema uygula; ana pencerenin subclass'larına dokunma.
+    _GUIDarkTheme_GUISetDarkTheme($hDialog, $darkMode)
+    Local $aDialogCtrls = _WinAPI_EnumChildWindows($hDialog, False)
+    If @error = 0 Then
+        For $i = 1 To $aDialogCtrls[0][0]
+            _GUIDarkTheme_GUICtrlSetDarkTheme($hDialog, $aDialogCtrls[$i][0], $darkMode)
+        Next
+    EndIf
+
+    GUISetState(@SW_SHOW, $hDialog)
+    Local $iResult = 0
+    While 1
+        Local $iMsg = GUIGetMsg()
+        Switch $iMsg
+            Case $btnYes
+                $iResult = 1
+                ExitLoop
+            Case $btnSkip
+                $iResult = 2
+                ExitLoop
+			Case $btnDisable
+				If _ConfirmDisableUpdates() = 1 Then
+					$iResult = 3
+					ExitLoop
+				EndIf
+            Case $GUI_EVENT_CLOSE
+                ExitLoop
+        EndSwitch
+        Sleep(20)
+    WEnd
+
+    GUIDelete($hDialog)
+    GUISetState(@SW_ENABLE, $hGUI)
+    WinActivate($hGUI)
+    Return $iResult
+EndFunc
+
+Func _ConfirmDisableUpdates()
+    Local $hConfirm = GUICreate("Güncelleme Bildirimleri", 430, 175, -1, -1, _
+            BitOR($WS_CAPTION, $WS_SYSMENU), -1, $hGUI)
+
+    Local $iBg = $darkMode ? 0x202020 : 0xFFFFFF
+    Local $iText = $darkMode ? 0xE0E0E0 : 0x243247
+
+    GUISetBkColor($iBg, $hConfirm)
+
+    GUICtrlCreateLabel( _
+        "Güncelleme bildirimlerini tekrar etkinleştirmek isterseniz:" & @CRLF & @CRLF & _
+        "config\config.ini dosyasındaki [Settings] bölümünde bulunan" & @CRLF & _
+        "disableUpdate satırını silebilir veya değerini 0 yapabilirsiniz." & @CRLF & @CRLF & _
+        "Güncelleme bildirimlerini kapatmak istiyor musunuz?", _
+        18, 15, 394, 105)
+
+    GUICtrlSetFont(-1, 9, 400, 0, "Segoe UI")
+    GUICtrlSetColor(-1, $iText)
+
+    Local $btnOK = GUICtrlCreateButton("Tamam", 205, 128, 95, 30)
+    Local $btnCancel = GUICtrlCreateButton("Vazgeç", 317, 128, 95, 30)
+
+    GUICtrlSetFont($btnOK, 9, 400, 0, "Segoe UI")
+    GUICtrlSetFont($btnCancel, 9, 400, 0, "Segoe UI")
+
+    _GUIDarkTheme_GUISetDarkTheme($hConfirm, $darkMode)
+
+    Local $aCtrls = _WinAPI_EnumChildWindows($hConfirm, False)
+    If @error = 0 Then
+        For $i = 1 To $aCtrls[0][0]
+            _GUIDarkTheme_GUICtrlSetDarkTheme($hConfirm, $aCtrls[$i][0], $darkMode)
+        Next
+    EndIf
+
+    GUISetState(@SW_SHOW, $hConfirm)
+
+    Local $iResult = 0
+
+    While 1
+        Local $iMsg = GUIGetMsg()
+
+        Switch $iMsg
+            Case $btnOK
+                $iResult = 1
+                ExitLoop
+
+            Case $btnCancel, $GUI_EVENT_CLOSE
+                ExitLoop
+        EndSwitch
+
+        Sleep(20)
+    WEnd
+
+    GUIDelete($hConfirm)
+    Return $iResult
 EndFunc
