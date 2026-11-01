@@ -23,6 +23,7 @@
 #include "bin\Includes\PMv2.au3"
 
 Global $version = "5.0" ; GitHub'daki tag ile karşılaştırılan uygulama sürümü
+Global $osbuild = 22000
 
 ; --- Güncelleme kontrolü ---
 Global $g_sUpdateResultFile = @TempDir & "\ZapretTurkey_Update_" & @AutoItPID & ".txt"
@@ -131,7 +132,7 @@ GUICtrlSetState(-1, $GUI_DISABLE)
 GUICtrlSetFont(-1, 11, 800, 0, "Segoe UI")
 
 ; MOTOR
-GUICtrlCreateLabel("Motor:", 50, 168, 120, 20)
+Global $lblEngine = GUICtrlCreateLabel("Motor:", 50, 168, 120, 20)
 GUICtrlSetFont(-1, 9, 600, 0, "Segoe UI")
 Local $cmbEngine = GUICtrlCreateCombo("Zapret2 (Yeni LUA Motoru)", 175, 165, 175, 25, $CBS_DROPDOWNLIST)
 GUICtrlSetData(-1, "Zapret (Eski Klasik Motor)")
@@ -140,14 +141,14 @@ GUICtrlSetFont(-1, 9, 400, 0, "Segoe UI")
 GUICtrlSetState(-1, $GUI_DISABLE)
 
 ; STRATEJİ
-GUICtrlCreateLabel("Strateji:", 50, 203, 120, 20)
+Global $lblStrategy = GUICtrlCreateLabel("Strateji:", 50, 203, 120, 20)
 GUICtrlSetFont(-1, 9, 600, 0, "Segoe UI")
 Global $cmbStrategy = GUICtrlCreateCombo("Turk Telekom", 175, 200, 175, 25, $CBS_DROPDOWNLIST)
 GUICtrlSetFont(-1, 9, 400, 0, "Segoe UI")
 GUICtrlSetState(-1, $GUI_DISABLE)
 
 ; FİLTRE
-GUICtrlCreateLabel("Filtre:", 50, 238, 120, 20)
+Global $lblFilter = GUICtrlCreateLabel("Filtre:", 50, 238, 120, 20)
 GUICtrlSetFont(-1, 9, 600, 0, "Segoe UI")
 Global $cmbFilter = GUICtrlCreateCombo("Kapalı (Tüm trafik)", 175, 235, 175, 25, $CBS_DROPDOWNLIST)
 Global $sFilterSelectionBeforeOOB = ""
@@ -575,13 +576,15 @@ Func _ShowUpdateChoiceDialog($sLatestVersion)
     GUISetState(@SW_DISABLE, $hGUI)
 
     ; İkincil pencereye tema uygula; ana pencerenin subclass'larına dokunma.
-    _GUIDarkTheme_GUISetDarkTheme($hDialog, $darkMode)
-    Local $aDialogCtrls = _WinAPI_EnumChildWindows($hDialog, False)
-    If @error = 0 Then
-        For $i = 1 To $aDialogCtrls[0][0]
-            _GUIDarkTheme_GUICtrlSetDarkTheme($hDialog, $aDialogCtrls[$i][0], $darkMode)
-        Next
-    EndIf
+	If $darkMode Or @OSBuild >= $osbuild Then
+		_GUIDarkTheme_GUISetDarkTheme($hDialog, $darkMode)
+		Local $aDialogCtrls = _WinAPI_EnumChildWindows($hDialog, False)
+		If @error = 0 Then
+			For $i = 1 To $aDialogCtrls[0][0]
+				_GUIDarkTheme_GUICtrlSetDarkTheme($hDialog, $aDialogCtrls[$i][0], $darkMode)
+			Next
+		EndIf
+	EndIf
 
     GUISetState(@SW_SHOW, $hDialog)
     Local $iResult = 0
@@ -636,7 +639,9 @@ Func _ConfirmDisableUpdates()
     GUICtrlSetFont($btnOK, 9, 400, 0, "Segoe UI")
     GUICtrlSetFont($btnCancel, 9, 400, 0, "Segoe UI")
 
-    _GUIDarkTheme_GUISetDarkTheme($hConfirm, $darkMode)
+	If $darkMode Or @OSBuild >= $osbuild Then
+		_GUIDarkTheme_GUISetDarkTheme($hConfirm, $darkMode)
+	EndIf
 
     Local $aCtrls = _WinAPI_EnumChildWindows($hConfirm, False)
     If @error = 0 Then
@@ -977,7 +982,10 @@ Func SetAppTheme($bDark)
         GUICtrlSetColor($statusID, 0xE0E0E0)
 
     Else
-		_GUIDarkTheme_ApplyLight($hGUI)
+		If @OSBuild >= $osbuild Then
+			_GUIDarkTheme_ApplyLight($hGUI)
+		EndIf
+
         ; Üst durum paneli
         GUICtrlSetBkColor($lblStatusBg, 0xF2F4F7)
         GUICtrlSetColor($lblStatusText, 0xE67E22)
