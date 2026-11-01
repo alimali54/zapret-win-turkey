@@ -25,6 +25,7 @@
 #include "bin\Includes\PMv2.au3"
 
 Global $version = "5.0" ; GitHub'daki tag ile karşılaştırılan uygulama sürümü
+Global $osbuild = 22000
 
 ; --- Güncelleme kontrolü ---
 Global $g_sUpdateResultFile = @TempDir & "\ZapretTurkey_Update_" & @AutoItPID & ".txt"
@@ -159,7 +160,7 @@ GUICtrlSetFont(-1, 11, 800, 0, "Segoe UI")
 ; --- 2. AYARLAR (DROPDOWN MENÜLER) ---
 ; =========================================================================
 ; MOTOR
-GUICtrlCreateLabel("Motor:", 50, 168, 120, 20)
+Global $lblEngine = GUICtrlCreateLabel("Motor:", 50, 168, 120, 20)
 GUICtrlSetFont(-1, 9, 600, 0, "Segoe UI")
 Local $cmbEngine = GUICtrlCreateCombo("Zapret2 (Yeni LUA Motoru)", 175, 165, 175, 25, $CBS_DROPDOWNLIST)
 GUICtrlSetData(-1, "Zapret (Eski Klasik Motor)")
@@ -168,14 +169,14 @@ GUICtrlSetFont(-1, 9, 400, 0, "Segoe UI")
 GUICtrlSetState(-1, $GUI_DISABLE)
 
 ; STRATEJİ
-GUICtrlCreateLabel("Strateji:", 50, 203, 120, 20)
+Global $lblStrategy = GUICtrlCreateLabel("Strateji:", 50, 203, 120, 20)
 GUICtrlSetFont(-1, 9, 600, 0, "Segoe UI")
 Global $cmbStrategy = GUICtrlCreateCombo("Analiz Sonucu", 175, 200, 175, 25, $CBS_DROPDOWNLIST)
 GUICtrlSetFont(-1, 9, 400, 0, "Segoe UI")
 GUICtrlSetState(-1, $GUI_DISABLE)
 
 ; FİLTRE
-GUICtrlCreateLabel("Filtre:", 50, 238, 120, 20)
+Global $lblFilter = GUICtrlCreateLabel("Filtre:", 50, 238, 120, 20)
 GUICtrlSetFont(-1, 9, 600, 0, "Segoe UI")
 Global $cmbFilter = GUICtrlCreateCombo("Kapalı (Tüm trafik)", 175, 235, 175, 25, $CBS_DROPDOWNLIST)
 Global $sFilterSelectionBeforeOOB = ""
@@ -940,21 +941,15 @@ Func _ChooseLanShareMethod()
     GUISetState(@SW_DISABLE, $hGUI)
 
 
-	If $darkMode Then
-		_GUIDarkTheme_GUISetDarkTheme($hChoice, True)
-	Else
-		_GUIDarkTheme_GUISetDarkTheme($hChoice, False)
-	EndIf
+If $darkMode Or @OSBuild >= $osbuild Then
+		_GUIDarkTheme_GUISetDarkTheme($hChoice, $darkMode)
 
-	Local $aCtrls = _WinAPI_EnumChildWindows($hChoice, False)
-	If @error = 0 Then
-		For $i = 1 To $aCtrls[0][0]
-			If $darkMode Then
-				_GUIDarkTheme_GUICtrlSetDarkTheme($hChoice, $aCtrls[$i][0], True)
-			Else
-				_GUIDarkTheme_GUICtrlSetDarkTheme($hChoice, $aCtrls[$i][0], False)
-			EndIf
-		Next
+		Local $aCtrls = _WinAPI_EnumChildWindows($hChoice, False)
+		If @error = 0 Then
+			For $i = 1 To $aCtrls[0][0]
+				_GUIDarkTheme_GUICtrlSetDarkTheme($hChoice, $aCtrls[$i][0], $darkMode)
+			Next
+		EndIf
 	EndIf
 
 	GUISetState(@SW_SHOW, $hChoice)
@@ -1013,21 +1008,15 @@ Func _ShowLanDeviceScan($hParent)
     _GUICtrlListView_SetColumnWidth(GUICtrlGetHandle($lvDevices), 2, 255)
     Local $btnClose = GUICtrlCreateButton("Kapat", 422, 394, 112, 30)
 
-	If $darkMode Then
-		_GUIDarkTheme_GUISetDarkTheme($hScan, True)
-	Else
-		_GUIDarkTheme_GUISetDarkTheme($hScan, False)
-	EndIf
+If $darkMode Or @OSBuild >= $osbuild Then
+		_GUIDarkTheme_GUISetDarkTheme($hScan, $darkMode)
 
-	Local $aCtrls = _WinAPI_EnumChildWindows($hScan, False)
-	If @error = 0 Then
-		For $i = 1 To $aCtrls[0][0]
-			If $darkMode Then
-				_GUIDarkTheme_GUICtrlSetDarkTheme($hScan, $aCtrls[$i][0], True)
-			Else
-				_GUIDarkTheme_GUICtrlSetDarkTheme($hScan, $aCtrls[$i][0], False)
-			EndIf
-		Next
+		Local $aCtrls = _WinAPI_EnumChildWindows($hScan, False)
+		If @error = 0 Then
+			For $i = 1 To $aCtrls[0][0]
+				_GUIDarkTheme_GUICtrlSetDarkTheme($hScan, $aCtrls[$i][0], $darkMode)
+			Next
+		EndIf
 	EndIf
 
 	GUISetState(@SW_SHOW, $hScan)
@@ -1792,21 +1781,15 @@ Func RunBlockcheck2($ctrlID)
     GUICtrlSetFont($lblScanCount, 10, 600, 0, "Segoe UI")
     Local $btnStopScan = GUICtrlCreateButton("Analizi Durdur", 95, 115, 170, 32)
 
-	If $darkMode Then
-		_GUIDarkTheme_GUISetDarkTheme($hScanGUI, True)
-	Else
-		_GUIDarkTheme_GUISetDarkTheme($hScanGUI, False)
-	EndIf
+If $darkMode Or @OSBuild >= $osbuild Then
+		_GUIDarkTheme_GUISetDarkTheme($hScanGUI, $darkMode)
 
-	Local $aCtrls = _WinAPI_EnumChildWindows($hScanGUI, False)
-	If @error = 0 Then
-		For $i = 1 To $aCtrls[0][0]
-			If $darkMode Then
-				_GUIDarkTheme_GUICtrlSetDarkTheme($hScanGUI, $aCtrls[$i][0], True)
-			Else
-				_GUIDarkTheme_GUICtrlSetDarkTheme($hScanGUI, $aCtrls[$i][0], False)
-			EndIf
-		Next
+		Local $aCtrls = _WinAPI_EnumChildWindows($hScanGUI, False)
+		If @error = 0 Then
+			For $i = 1 To $aCtrls[0][0]
+				_GUIDarkTheme_GUICtrlSetDarkTheme($hScanGUI, $aCtrls[$i][0], $darkMode)
+			Next
+		EndIf
 	EndIf
 
     GUISetState(@SW_SHOW, $hScanGUI)
@@ -2083,21 +2066,15 @@ Func _ShowStrategyTestWindow(ByRef $aStrategies, $bMainAlreadyDisabled = False)
     Local $btnCloseTest = GUICtrlCreateButton("Kapat", 385, 258, 100, 34)
     Local $bStrategyTestRunning = False
 
-	If $darkMode Then
-		_GUIDarkTheme_GUISetDarkTheme($hTestGUI, True)
-	Else
-		_GUIDarkTheme_GUISetDarkTheme($hTestGUI, False)
-	EndIf
+If $darkMode Or @OSBuild >= $osbuild Then
+		_GUIDarkTheme_GUISetDarkTheme($hTestGUI, $darkMode)
 
-	Local $aCtrls = _WinAPI_EnumChildWindows($hTestGUI, False)
-	If @error = 0 Then
-		For $i = 1 To $aCtrls[0][0]
-			If $darkMode Then
-				_GUIDarkTheme_GUICtrlSetDarkTheme($hTestGUI, $aCtrls[$i][0], True)
-			Else
-				_GUIDarkTheme_GUICtrlSetDarkTheme($hTestGUI, $aCtrls[$i][0], False)
-			EndIf
-		Next
+		Local $aCtrls = _WinAPI_EnumChildWindows($hTestGUI, False)
+		If @error = 0 Then
+			For $i = 1 To $aCtrls[0][0]
+				_GUIDarkTheme_GUICtrlSetDarkTheme($hTestGUI, $aCtrls[$i][0], $darkMode)
+			Next
+		EndIf
 	EndIf
 
 	GUISetState(@SW_SHOW, $hTestGUI)
@@ -2392,7 +2369,10 @@ Func SetAppTheme($bDark)
         GUICtrlSetColor($statusID, 0xE0E0E0)
 
     Else
-		_GUIDarkTheme_ApplyLight($hGUI)
+		If @OSBuild >= $osbuild Then
+			_GUIDarkTheme_ApplyLight($hGUI)
+		EndIf
+
         ; Üst durum paneli
         GUICtrlSetBkColor($lblStatusBg, 0xF2F4F7)
         GUICtrlSetColor($lblStatusText, 0xE67E22)
@@ -2515,13 +2495,15 @@ Func _ShowUpdateChoiceDialog($sLatestVersion)
     ; Ana pencereyi modal davranış için geçici devre dışı bırak.
     GUISetState(@SW_DISABLE, $hGUI)
 
-    ; İkincil pencereye tema uygula; ana pencerenin subclass'larına dokunma.
-    _GUIDarkTheme_GUISetDarkTheme($hDialog, $darkMode)
-    Local $aDialogCtrls = _WinAPI_EnumChildWindows($hDialog, False)
-    If @error = 0 Then
-        For $i = 1 To $aDialogCtrls[0][0]
-            _GUIDarkTheme_GUICtrlSetDarkTheme($hDialog, $aDialogCtrls[$i][0], $darkMode)
-        Next
+    ; Windows 10 açık temada tema UDF'sini çağırma; koyu tema her sürümde uygulanır.
+    If $darkMode Or @OSBuild >= $osbuild Then
+        _GUIDarkTheme_GUISetDarkTheme($hDialog, $darkMode)
+        Local $aDialogCtrls = _WinAPI_EnumChildWindows($hDialog, False)
+        If @error = 0 Then
+            For $i = 1 To $aDialogCtrls[0][0]
+                _GUIDarkTheme_GUICtrlSetDarkTheme($hDialog, $aDialogCtrls[$i][0], $darkMode)
+            Next
+        EndIf
     EndIf
 
     GUISetState(@SW_SHOW, $hDialog)
@@ -2577,13 +2559,15 @@ Func _ConfirmDisableUpdates()
     GUICtrlSetFont($btnOK, 9, 400, 0, "Segoe UI")
     GUICtrlSetFont($btnCancel, 9, 400, 0, "Segoe UI")
 
-    _GUIDarkTheme_GUISetDarkTheme($hConfirm, $darkMode)
+    If $darkMode Or @OSBuild >= $osbuild Then
+        _GUIDarkTheme_GUISetDarkTheme($hConfirm, $darkMode)
 
-    Local $aCtrls = _WinAPI_EnumChildWindows($hConfirm, False)
-    If @error = 0 Then
-        For $i = 1 To $aCtrls[0][0]
-            _GUIDarkTheme_GUICtrlSetDarkTheme($hConfirm, $aCtrls[$i][0], $darkMode)
-        Next
+        Local $aCtrls = _WinAPI_EnumChildWindows($hConfirm, False)
+        If @error = 0 Then
+            For $i = 1 To $aCtrls[0][0]
+                _GUIDarkTheme_GUICtrlSetDarkTheme($hConfirm, $aCtrls[$i][0], $darkMode)
+            Next
+        EndIf
     EndIf
 
     GUISetState(@SW_SHOW, $hConfirm)
