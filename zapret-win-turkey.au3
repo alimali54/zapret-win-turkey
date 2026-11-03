@@ -3,8 +3,8 @@
 #AutoIt3Wrapper_Icon=bin\zapret\zapret-winws\winws2.ico
 #AutoIt3Wrapper_UseX64=y
 #AutoIt3Wrapper_Res_Description=Zapret Multi-Engine Windows Türkiye - Zapret & Zapret2 Kontrol Aracı
-#AutoIt3Wrapper_Res_Fileversion=5.0.0.0
-#AutoIt3Wrapper_Res_ProductVersion=5.0
+#AutoIt3Wrapper_Res_Fileversion=5.1.0.0
+#AutoIt3Wrapper_Res_ProductVersion=5.1
 #AutoIt3Wrapper_Res_LegalCopyright=Ali Mali
 #AutoIt3Wrapper_Res_Language=1055
 #EndRegion ;**** Directives created by AutoIt3Wrapper_GUI ****
@@ -24,8 +24,15 @@
 #include "bin\Includes\GUIDarkTheme.au3"
 #include "bin\Includes\PMv2.au3"
 
-Global $version = "5.0" ; GitHub'daki tag ile karşılaştırılan uygulama sürümü
-Global $osbuild = 22000
+Global $version = "5.1" ; GitHub'daki tag ile karşılaştırılan uygulama sürümü
+Global $osbuild = 26150 ; 25h2 öncesi için aydınlık tema düzeltmesi
+
+; --- Ayarlar ve Dosya Yolları ---
+Local $serviceName = "ZapretService"
+Local $hostlistPath = @ScriptDir & "\config\autohostlist.txt"
+Local $normalHostlistPath = @ScriptDir & "\config\hostlist.txt"
+Local $iniPath = @ScriptDir & "\config\config.ini"
+Local $exludelistPath = @ScriptDir & "\config\excludelist.txt"
 
 ; --- Güncelleme kontrolü ---
 Global $g_sUpdateResultFile = @TempDir & "\ZapretTurkey_Update_" & @AutoItPID & ".txt"
@@ -51,8 +58,18 @@ If StringInStr($currentDir, @TempDir) Or StringInStr($currentDir, "Temporary Int
     Exit
 EndIf
 
-; --- GÜVENLİK UYARILARINI KALDIR ---
-RunWait('powershell -Command "Get-ChildItem -Path ''' & @ScriptDir & ''' -Recurse | Unblock-File"', "", @SW_HIDE)
+; --- GÜVENLİK UYARILARINI KALDIR (İLK ÇALIŞTIRMADA) ---
+Local $sFirstRun = IniRead($iniPath, "Settings", "firstrun", "1")
+
+If $sFirstRun <> "0" Then
+    Local $iUnblockExit = RunWait('powershell -Command "Get-ChildItem -Path ''' & @ScriptDir & ''' -Recurse | Unblock-File"', "", @SW_HIDE)
+    Local $iRunError = @error
+
+    ; İşlem başarıyla tamamlandıysa bir daha çalıştırma
+    If $iRunError = 0 And $iUnblockExit = 0 Then
+        IniWrite($iniPath, "Settings", "firstrun", "0")
+    EndIf
+EndIf
 
 ; --- ÇAKIŞMA KONTROLÜ (GoodbyeDPI) ---
 If ProcessExists("goodbyedpi.exe") Then
@@ -72,13 +89,6 @@ EndIf
 
 Opt("TrayMenuMode", 3)
 Opt("TrayOnEventMode", 1)
-
-; --- Ayarlar ve Dosya Yolları ---
-Local $serviceName = "ZapretService"
-Local $hostlistPath = @ScriptDir & "\config\autohostlist.txt"
-Local $normalHostlistPath = @ScriptDir & "\config\hostlist.txt"
-Local $iniPath = @ScriptDir & "\config\config.ini"
-Local $exludelistPath = @ScriptDir & "\config\excludelist.txt"
 
 ; --- CONFIG DOSYASINDAN AYARLARI OKU ---
 Local $iniEngine = IniRead($iniPath, "Settings", "ActiveEngine", "0") ; 0 = Zapret2, 1 = Zapret1
@@ -123,7 +133,7 @@ Global $hInstallServiceUnlockTimer = 0
 Global $bInstallServiceEnableAfterLock = True
 
 ; --- GUI Tasarımı ---
-Global $hGUI = GUICreate("Zapret Windows Türkiye v5.0", 400, 535)
+Global $hGUI = GUICreate("Zapret Windows Türkiye v5.1", 400, 535)
 GUISetBkColor(0xFFFFFF)
 
 ; --- Tepsi Menüsü ---
@@ -2477,11 +2487,15 @@ Func _ShowUpdateChoiceDialog($sLatestVersion)
     Local $iText = $darkMode ? 0xE0E0E0 : 0x243247
     GUISetBkColor($iBg, $hDialog)
 
-    GUICtrlCreateLabel("Yeni bir Zapret Windows Türkiye sürümü yayımlandı.", 18, 18, 394, 24)
+    GUICtrlCreateLabel("Yeni bir Zapret Windows Türkiye sürümü yayımlandı.", 18, 12, 394, 24)
     GUICtrlSetFont(-1, 10, 600, 0, "Segoe UI")
     GUICtrlSetColor(-1, $iText)
 
-    GUICtrlCreateLabel("Mevcut sürüm: v" & $version & "    |    Yeni sürüm: " & $sLatestVersion, 18, 52, 394, 22)
+	Local $lblDownload = GUICtrlCreateLabel("İndirme sayfası açılsın mı?", 18, 70, 394, 22)
+	GUICtrlSetFont($lblDownload, 10, 400, 0, "Segoe UI")
+	GUICtrlSetColor($lblDownload, $iText)
+
+    GUICtrlCreateLabel("Mevcut sürüm: v" & $version & "    |    Yeni sürüm: " & $sLatestVersion, 18, 43, 394, 22)
     GUICtrlSetFont(-1, 9, 400, 0, "Segoe UI")
     GUICtrlSetColor(-1, $iText)
 
