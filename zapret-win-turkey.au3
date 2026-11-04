@@ -3,8 +3,8 @@
 #AutoIt3Wrapper_Icon=bin\zapret\zapret-winws\winws2.ico
 #AutoIt3Wrapper_UseX64=y
 #AutoIt3Wrapper_Res_Description=Zapret Multi-Engine Windows Türkiye - Zapret & Zapret2 Kontrol Aracı
-#AutoIt3Wrapper_Res_Fileversion=5.1.0.0
-#AutoIt3Wrapper_Res_ProductVersion=5.1
+#AutoIt3Wrapper_Res_Fileversion=5.2.0.0
+#AutoIt3Wrapper_Res_ProductVersion=5.2
 #AutoIt3Wrapper_Res_LegalCopyright=Ali Mali
 #AutoIt3Wrapper_Res_Language=1055
 #EndRegion ;**** Directives created by AutoIt3Wrapper_GUI ****
@@ -24,7 +24,7 @@
 #include "bin\Includes\GUIDarkTheme.au3"
 #include "bin\Includes\PMv2.au3"
 
-Global $version = "5.1" ; GitHub'daki tag ile karşılaştırılan uygulama sürümü
+Global $version = "5.2" ; GitHub'daki tag ile karşılaştırılan uygulama sürümü
 Global $osbuild = 26150 ; 25h2 öncesi için aydınlık tema düzeltmesi
 
 ; --- Ayarlar ve Dosya Yolları ---
@@ -133,7 +133,7 @@ Global $hInstallServiceUnlockTimer = 0
 Global $bInstallServiceEnableAfterLock = True
 
 ; --- GUI Tasarımı ---
-Global $hGUI = GUICreate("Zapret Windows Türkiye v5.1", 400, 535)
+Global $hGUI = GUICreate("Zapret Windows Türkiye v5.2", 400, 535)
 GUISetBkColor(0xFFFFFF)
 
 ; --- Tepsi Menüsü ---
@@ -820,7 +820,7 @@ EndFunc
 
 Func _UpdateFilterForStrategy()
     Local $sStrategy = _GetActiveStrategyString()
-    Local $bHasOOB = StringInStr($sStrategy, "oob") > 0
+    Local $bHasOOB = StringInStr($sStrategy, "oob") > 0 or StringInStr($sStrategy, "syndata") > 0
 
     If $bHasOOB Then
         If Not $bOOBFilterLock Then
@@ -1535,7 +1535,7 @@ Func StartWinws($ctrlID, $statusID, $aBtns)
 
     Local $fullCommand = ""
 
-    Local $bStrategyHasOOB = StringInStr($activeStrategy, "oob") > 0
+    Local $bStrategyHasOOB = StringInStr($activeStrategy, "oob") > 0 or StringInStr($activeStrategy, "syndata") > 0
     If $currentEngine = "Zapret2" Then
         Local $luaBaseDir = StringRegExpReplace($winwsPath, "\\[^\\]+$", "") & "\lua\"
         Local $luaParams = ' --lua-init="@' & $luaBaseDir & 'zapret-lib.lua"' & _
@@ -1611,7 +1611,7 @@ Func InstallServiceClean($chkID)
 
     Local $binArgs = ""
 
-    Local $bStrategyHasOOB = StringInStr($activeStrategy, "oob") > 0
+    Local $bStrategyHasOOB = StringInStr($activeStrategy, "oob") > 0 or StringInStr($activeStrategy, "syndata")
     If $currentEngine = "Zapret2" Then
         Local $luaBaseDir = StringRegExpReplace($winwsPath, "\\[^\\]+$", "") & "\lua\"
         Local $luaParams = ' --lua-init="@' & $luaBaseDir & 'zapret-lib.lua"' & _
@@ -2192,8 +2192,8 @@ Func _BuildStrategyTestCommand($sStrategy)
 EndFunc
 
 Func _UpdateOobWarning($sStrategy, $lblOobWarning)
-    If StringInStr($sStrategy, "oob") Then
-        GUICtrlSetData($lblOobWarning, "UYARI: Bu strateji OOB içeriyor. Filtreler ile çalışmamaktadır. Sistem geneli çalışacaktır. Bazı sitelerde sorun yaratabilir.")
+    If StringInStr($sStrategy, "oob") or StringInStr($sStrategy, "syndata") Then
+        GUICtrlSetData($lblOobWarning, "UYARI: Bu strateji OOB veya SYNDATA içeriyor. Filtreler ile çalışmamaktadır. Sistem geneli çalışacaktır. Bazı sitelerde sorun yaratabilir.")
         GUICtrlSetState($lblOobWarning, $GUI_SHOW)
     Else
         GUICtrlSetData($lblOobWarning, "")
