@@ -18,6 +18,36 @@ Bu programın amacı, Türk kullanıcılar için DPI (Deep Packet Inspection / D
 - **Excludelist Desteği:** Zapret'in aktif olmasını istemediğiniz domain'leri excludelist.txt dosyasına yazabilirsiniz. Varsayılan olarak com.tr ve gov.tr uzantılı siteler eklenmiştir.
 - **Ağdaki Cihazlarla Paylaş:** `go-pcap2socks` entegrasyonu sayesinde, bilgisayarınızda çalışan Zapret motorunu yerel ağdaki diğer cihazlarınızla (PlayStation, Xbox, Nintendo Switch, Akıllı TV vb.) paylaşmanızı sağlar. Konsollarda Discord ve Roblox gibi erişim engellerini aşmanın en kararlı yoludur.
 
+## ⚠️ OOB ve Syndata Stratejileri Hakkında Önemli Not
+
+OOB ve Syndata stratejileri, uygulama tarafından da belirtildiği üzere hostname tabanlı filtreleme seçenekleriyle uyumlu çalışmamaktadır.
+
+Aşağıdaki parametreler bu stratejilerle birlikte kullanıldığında stratejiler maalesef çalışmaz:
+
+- `--hostlist`
+- `--hostlist-auto`
+- `--hostlist-domains`
+- `--hostlist-exclude`
+- `--hostlist-exclude-domains`
+
+**Peki, bu stratejileri filtre kullanarak çalıştırmak istiyorsanız ne yapmalısınız?**
+
+Hostname (alan adı) yerine IP adresi üzerinden filtreleme yapmanız gerekir.
+
+Örneğin Discord ve Roblox için:
+
+1. İlgili strateji dosyasını (`strategy2.txt`) açın.
+2. Dosyanın sonuna aşağıdaki parametreyi ekleyin:
+
+   ```text
+   --ipset-ip=128.116.0.0/16,2.20.245.0/24,23.194.190.0/24,65.9.130.0/24,104.18.2.0/23,162.159.128.0/20,34.126.226.51/32
+   ```
+
+**Önemli uyarılar:**
+
+- Bu IP aralıkları Discord ve Roblox dışında başka servisler tarafından da kullanılıyor olabilir. Dolayısıyla bu filtreleme, yalnızca söz konusu iki servisi etkilemekle sınırlı kalmayabilir.
+- IP adresleri ve IP aralıkları zaman içerisinde değişebilir. Kullandığınız IP listesini güncel tutmak sizin sorumluluğunuzdadır.
+
 ## Yerel Ağ Paylaşımı (Konsol / Diğer Cihazlar)
 
 **Ağdaki Cihazlarla Paylaş** özelliği, bilgisayarınızda çalışan Zapret yapılandırmasını PlayStation, Xbox ve Roblox gibi hizmetleri kullanan diğer cihazlarda kullanmanızı sağlar. Özellik iki farklı yöntem sunar: **go-pcap2socks** ve **V2Ray + MaraDNS**.
