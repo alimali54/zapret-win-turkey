@@ -37,6 +37,20 @@ DESYNC_MARK=0x10000000
 CURL_MAX_TIME=${CURL_MAX_TIME:-2}
 CURL_MAX_TIME_QUIC=${CURL_MAX_TIME_QUIC:-$CURL_MAX_TIME}
 CURL_MAX_TIME_DOH=${CURL_MAX_TIME_DOH:-2}
+# CURL_PAD pads every curl request with the given number of bytes, useful
+# for the "16 KB" whitelist-style block (see docs): that block triggers on
+# total bytes transferred on the connection, not on how much of it was an
+# actual response, so padding the request is enough to test for it even
+# against a target with no large page of its own to download - e.g. a bare
+# IP from a provider's range rather than a known blocked domain. The padding
+# is written straight to a small temp file (nothing large ever passes
+# through a shell variable, command substitution, or argument) and attached
+# as a header with curl's own @filename form of -H, which reads the file
+# instead of taking the value on the command line - unlike an equivalent
+# amount of data passed via --data/--data-binary, this doesn't conflict with
+# HEAD requests, so it composes cleanly with CURL_HTTPS_GET either way.
+CURL_PAD=${CURL_PAD:-0}
+PAD_MAX_HEADER=${PAD_MAX_HEADER:-4000}
 USER_AGENT=${USER_AGENT:-Mozilla}
 HTTP_PORT=${HTTP_PORT:-80}
 HTTPS_PORT=${HTTPS_PORT:-443}
@@ -49,7 +63,6 @@ IPFW_RULE_NUM=${IPFW_RULE_NUM:-$(($$ % $IPFW_RULE_MAX + 1))}
 IPFW_DIVERT_PORT=${IPFW_DIVERT_PORT:-$(($$ % 64536 + 1000))}
 QNUM=${QNUM:-$(($$ % 64536 + 1000))}
 
-IPSET_FILE=/tmp/blockcheck_ipset_$$.txt
 PARALLEL_OUT=/tmp/zapret_parallel_$$
 HDRTEMP=/tmp/zapret-hdr-$$
 NFT_TABLE=blockcheck$$
@@ -58,7 +71,7 @@ IPT_IN_CHAIN=blockcheck_input_$$
 IPT_COMMENT="-m comment --comment blockcheck_$$"
 
 DNSCHECK_DNS=${DNSCHECK_DNS:-8.8.8.8 1.1.1.1 77.88.8.1}
-DNSCHECK_DOM=${DNSCHECK_DOM:-pornhub.com ej.ru rutracker.org www.torproject.org bbc.com}
+DNSCHECK_DOM=${DNSCHECK_DOM:-discord.com roblox.com}
 DOH_SERVERS=${DOH_SERVERS:-"https://cloudflare-dns.com/dns-query https://dns.google/dns-query https://dns.quad9.net/dns-query https://dns.adguard.com/dns-query https://common.dot.dns.yandex.net/dns-query"}
 DNSCHECK_DIG1=/tmp/dig1.txt
 DNSCHECK_DIG2=/tmp/dig2.txt
@@ -70,11 +83,44 @@ PF_RULES_SAVE=/tmp/pf-zapret-save.conf
 
 unset ALL_PROXY
 
+apply_header_padfile()
+{
+	local n=1 left size
+	if [ "$CURL_PAD" -gt 0 ] 2>/dev/null; then
+		left=$CURL_PAD
+		CURL_PAD_FILE=/tmp/zapret-curlpad-$$
+		rm -f "$CURL_PAD_FILE"
+		touch "$CURL_PAD_FILE"
+		while [ "$left" -ge 14 ]; do
+			left=$(($left-14))
+			if [ "$left" -gt "$PAD_MAX_HEADER" ]; then
+				size="$PAD_MAX_HEADER"
+			else
+				size=$left
+			fi
+			left=$(($left-$size))
+			# if the next header would be too small add the remainder to the current header
+			[ "$left" -lt 14 ] && size=$(($size+$left))
+
+			printf 'X-Pad-%04d: ' $n >> "$CURL_PAD_FILE"
+			head -c $size /dev/zero | tr '\0' A >> "$CURL_PAD_FILE"
+			# curl internally adds 0D0A line ending even if it's 0A in the file
+			echo >> "$CURL_PAD_FILE"
+			n=$(($n+1))
+		done
+		CURL_OPT="${CURL_OPT}${CURL_OPT:+ }-H @$CURL_PAD_FILE"
+	fi
+}
+
+
 killwait()
 {
 	# $1 - signal (-9, -2, ...)
 	# $2 - pid
-	kill $1 $2
+	local KILL=kill
+	# avoid internal bash kill in cygwin to support -f
+	[ "$UNAME" = "CYGWIN" ] && KILL=/bin/kill
+	$KILL $1 $2
 	# suppress job kill message
 	wait $2 2>/dev/null
 }
@@ -161,6 +207,7 @@ cleanup()
 		    pf_clean
 		    ;;
 	esac
+	[ -n "$CURL_PAD_FILE" ] && rm -f "$CURL_PAD_FILE"
 }
 
 IPT()
@@ -819,7 +866,7 @@ pktws_ipt_prepare()
 	# $2 - port
 	# $3 - ip list
 
-	local ip
+	local ip v=
 
 	case "$FWTYPE" in
 		iptables)
@@ -839,10 +886,12 @@ pktws_ipt_prepare()
 			opf_prepare_dvtws $1 $2 "$3"
 			;;
 		windivert)
+			[ "$IPV" = 6 ] && v="v6"
 			WF="--wf-l3=ipv${IPV} --wf-${1}-out=$2"
-			rm -f "$IPSET_FILE"
+			WFRAWF=
 			for ip in $3; do
-				echo $ip >>"$IPSET_FILE"
+				[ -n "$WFRAWF" ] && WFRAWF="$WFRAWF or "
+				WFRAWF="${WFRAWF}ip${v}.DstAddr=$ip or ip${v}.SrcAddr=$ip"
 			done
 			;;
 
@@ -871,8 +920,7 @@ pktws_ipt_unprepare()
 			pf_restore
 			;;
 		windivert)
-			unset WF
-			rm -f "$IPSET_FILE"
+			unset WF WFRAWF
 			;;
 	esac
 }
@@ -940,6 +988,7 @@ pktws_ipt_unprepare_udp()
 	pktws_ipt_unprepare udp $1
 }
 
+
 pktws_start()
 {
 	case "$UNAME" in
@@ -950,19 +999,27 @@ pktws_start()
 			"$DVTWS2" --port=$IPFW_DIVERT_PORT --lua-init=@"$ZAPRET_BASE/lua/zapret-lib.lua" --lua-init=@"$ZAPRET_BASE/lua/zapret-antidpi.lua" "$@" >/dev/null &
 			;;
 		CYGWIN)
-			# allow multiple PKTWS instances with the same wf filter but different ipset
 			# some methods require empty acks
-			"$WINWS2" --wf-dup-check=0 --wf-tcp-empty=1 $WF --ipset="$IPSET_FILE" --lua-init=@"$ZAPRET_BASE/lua/zapret-lib.lua" --lua-init=@"$ZAPRET_BASE/lua/zapret-antidpi.lua" "$@" >/dev/null &
+			# use raw filter to filter target ip addresses in-kernel to allow multiple blockchecks running at the same time
+			# use guard timer to kill unmanaged pktws instances
+			"$WINWS2" --wf-tcp-empty=1 $WF --wf-raw-filter="$WFRAWF" \
+				--lua-init="timer_set('exit_guard',function(name,data) io.stderr:write('exit_guard\n'); os.exit(3000); end,20000,true)" \
+				--lua-init=@"$ZAPRET_BASE/lua/zapret-lib.lua" --lua-init=@"$ZAPRET_BASE/lua/zapret-antidpi.lua" "$@" >/dev/null &
 			;;
 	esac
 	PID=$!
 	# give some time to initialize
 	minsleep
 }
+
 ws_kill()
 {
+	local sig
 	[ -z "$PID" ] || {
-		killwait -9 $PID 2>/dev/null
+		sig=-9
+		# use fast kill using TerminateProcess() in cygwin
+		[ "$UNAME" = "CYGWIN" ] && sig=-f
+		killwait $sig $PID 2>/dev/null
 		PID=
 	}
 }
@@ -1170,6 +1227,29 @@ result_intersection_print()
 			echo "$val"
 		}
 		n=$(($n + 1))
+	done
+}
+result_coverage_print()
+{
+	# Lists every distinct successful strategy together with how many of the
+	# DOMAINS_COUNT domains/targets it worked for, most-covered first.
+	# Unlike result_intersection_print, a strategy doesn't need 100% coverage
+	# to be listed here - useful when DOMAINS is a set of largely independent
+	# targets (e.g. one IP per ASN/provider) where no single strategy is
+	# expected to satisfy every one of them, and the question is which
+	# strategy gets closest.
+	local n=0 hash hashvar hashcountvar ct val
+	while : ; do
+		eval hash=\"\$RES_$n\"
+		[ -n "$hash" ] || break
+		hashvar=RESHASH_${hash}
+		hashcountvar=${hashvar}_COUNTER
+		eval ct=\"\$$hashcountvar\"
+		eval val=\"\$$hashvar\"
+		printf '%s %s\n' "$ct" "$val"
+		n=$(($n + 1))
+	done | sort -rn | while IFS=' ' read -r ct rest; do
+		echo "$ct/$DOMAINS_COUNT : $rest"
 	done
 }
 report_strategy()
@@ -1704,6 +1784,16 @@ check_dns()
 	return $r
 }
 
+block_signals()
+{
+	# prevent signal function reenter
+	trap '' QUIT TERM HUP PIPE INT
+}
+untrap()
+{
+	trap - QUIT TERM HUP PIPE INT
+}
+
 unprepare_all()
 {
 	# make sure we are not in a middle state that impacts connectivity
@@ -1719,18 +1809,23 @@ unprepare_all()
 }
 sigint()
 {
+	block_signals
 	echo
 	echo terminating...
 	unprepare_all
+	# exitp can wait for the user input. restore default signal behavior without trap
+	untrap
 	exitp 1
 }
 sigint_cleanup()
 {
+	block_signals
 	cleanup
 	exit 1
 }
 sigsilent()
 {
+	block_signals
 	# must not write anything here to stdout
 	unprepare_all
 	exit 1
@@ -1746,14 +1841,14 @@ trap sigint_cleanup INT
 check_dns
 check_virt
 ask_params
+apply_header_padfile
 trap - INT
 
 PID=
 NREPORT=
 unset WF
 trap sigint INT
-trap sigsilent PIPE
-trap sigsilent HUP
+trap sigsilent PIPE HUP TERM QUIT
 for dom in $DOMAINS; do
 	for IPV in $IPVS; do
 		configure_ip_version
@@ -1767,9 +1862,7 @@ for dom in $DOMAINS; do
 		[ "$ENABLE_HTTP3" = 1 ] && check_domain_http3 $dom
 	done
 done
-trap - HUP
-trap - PIPE
-trap - INT
+untrap
 
 cleanup
 
@@ -1781,10 +1874,13 @@ report_print
 	echo \* COMMON
 	result_intersection_print
 	echo
+	echo \* COVERAGE
+	result_coverage_print
+	echo
 	[ "$SCANLEVEL" = force ] || {
 		echo "blockcheck optimizes test sequence. To save time some strategies can be skipped if their test is considered useless."
-		echo "That's why COMMON intersection can miss strategies that would work for all domains."
-		echo "Use \"force\" scan level to test all strategies and generate trustable intersection."
+		echo "That's why COMMON intersection can miss strategies that would work for all domains, and COVERAGE counts can undercount."
+		echo "Use \"force\" scan level to test all strategies and generate trustable results."
 		echo "Current scan level was \"$SCANLEVEL\"".
 	}
 }

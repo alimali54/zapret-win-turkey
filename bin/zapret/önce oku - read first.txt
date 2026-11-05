@@ -1,8 +1,0 @@
-Paste the contents of zapret-win-bundle here. / zapret-win-bundle içeriğini buraya yapıştırın.
-
-DO NOT OVERRIDE blockcheck.sh and blockcheck2.sh / blockcheck.sh ve blockcheck2.sh dosyalarının ÜZERİNE YAZMAYIN.
-
-delete the 23-oob.sh file in \zapret\blockcheck\zapret2\blockcheck2.d\standard
-\zapret\blockcheck\zapret2\blockcheck2.d\standard içindeki 23-oob.sh dosyasını silin
-
-oob strategies not working with hostlist / oob stratejileri hostlist ile çalışmıyor
