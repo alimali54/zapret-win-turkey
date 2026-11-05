@@ -1,0 +1,93 @@
+// Config file of V2Ray. This file follows standard JSON format, with comments support.
+// Uncomment entries below to satisfy your needs. Also read our manual for more detail at
+// https://www.v2fly.org/
+{
+  "log": {
+    // Log level, one of "debug", "info", "warning", "error", "none"
+    "loglevel": "debug"
+  },
+
+  // List of inbound proxy configurations.
+  "inbounds": [{
+    "port": 443,
+    "listen": "0.0.0.0",
+    "tag": "port443-in",
+    "protocol": "dokodemo-door",
+    "settings": {
+      "address": "3.3.3.3",
+      "port": 443,
+      "network": "tcp",
+      "followRedirect": true
+    },
+    "sniffing": {
+      "enabled": true,
+      // Target domain will be overriden to the one carried by the connection, if the connection is HTTP or HTTPS.
+      "destOverride": ["http", "tls"]
+    }
+  },{
+    "port": 80,
+    "listen": "0.0.0.0",
+    "tag": "port80-in",
+    "protocol": "dokodemo-door",
+    "settings": {
+      "address": "3.3.3.3",
+      "port": 80,
+      "network": "tcp",
+      "followRedirect": true
+    },
+    "sniffing": {
+      "enabled": true,
+      // Target domain will be overriden to the one carried by the connection, if the connection is HTTP or HTTPS.
+      "destOverride": ["http", "tls"]
+    }
+  }],
+
+  // List of outbound proxy configurations.
+  "outbounds": [{
+    "protocol": "freedom",
+    "settings": {},
+    "tag": "direct"
+  },{
+    "protocol": "blackhole",
+    "settings": {},
+    "tag": "blocked"
+  }],
+
+  // Routing controls how traffic from inbounds are sent to outbounds.
+  "routing": {
+    "domainStrategy": "IPOnDemand",
+    "rules":[
+      {
+        // Allow requests from LAN
+        "type": "field",
+        "port": "80,443",
+        "network": "tcp",
+        "source": ["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"],
+        "inboundTag": ["port443-in", "port80-in"],
+        "outboundTag": "direct"
+      },{
+        // Block everything else
+        "type": "field",
+        "network": "tcp",
+        "outboundTag": "blocked"
+      }
+    ]
+  },
+
+  // Dns settings for domain resolution.
+  "dns": {
+    // Static hosts, similar to hosts file.
+    "hosts": {
+      // The following settings help to eliminate DNS poisoning in mainland China.
+      // It is safe to comment these out if this is not the case for you.
+      //"domain:github.io": "pages.github.com",
+      //"domain:wikipedia.org": "www.wikimedia.org",
+      //"domain:shadowsocks.org": "electronicsrealm.com"
+    },
+    "servers": [
+      //"1.1.1.1",
+      //"8.8.8.8",
+      //"localhost"
+    ]
+  }
+}

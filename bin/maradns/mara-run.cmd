@@ -1,0 +1,1 @@
+maradns.exe -f mara-config.txt

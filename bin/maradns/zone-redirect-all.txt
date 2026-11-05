@@ -1,0 +1,12 @@
+# This is an example csv2_default_zonefile
+
+*       SOA     example.com. email@example.com. 1 7200 3600 604800 1800
+
+*       NS      a.example.com.
+*       NS      b.example.com.
+
+# Here are some A (ipv4 address) records; since this is the most
+# common field, the zone file format allows a compact representation
+# of it.
+
+* 10.201.76.177
