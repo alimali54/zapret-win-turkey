@@ -14,7 +14,7 @@ Program sistem DNS'ini Cloudflare (1.1.1.1) yaparken DNS-over-HTTPS (DoH) sunucu
 ### 2. DNS "zehirlenme" tespiti çok sıcaktı
 `CheckDnsPoisoningSilent()` fonksiyonu, tanınmayan bir DNS yanıtı geldiği anı otomatik olarak "DNS zehirlenmesi" olarak işaretleyip (`Return True`) butonları kilitliyordu. Bu da geçerli DNS ayarlarıyla bile programı çalıştıramamaya sebep oluyordu.
 
-**Düzeltme:** Tanınmayan/beyaz-liste dışındaki yanıtlar artık otomatik zehirlenme sayılmıyor (`Return False`). Sadece bilinen TT zehirlenme IP'si (`195.175.254.2`) tespit edildiğinde uyarı veriliyor.
+**Düzeltme:** Tanınmayan/beyaz-liste dışındaki yanıtlar artık otomatik zehirlenme sayılmıyor (`Return False`). Sadece bilinen TT zehirlenme IP'si (`ip`) tespit edildiğinde uyarı veriliyor.
 
 ### 3. Blockcheck2 `.bak` yedekleme kilidi
 Özel test domeni ayarı yapıldığında `blockcheck2.sh` yedekleniyordu; eskiden bir `.bak` dosyası kalıyorsa işlem tamamen durduruluyordu ve tekrar analiz yapılamıyordu.
