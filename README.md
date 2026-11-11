@@ -1,149 +1,57 @@
-<img width="402" height="423" alt="image" src="https://github.com/user-attachments/assets/e18092cf-526a-4226-922f-71c84ad0c3cf" />
-<img width="402" height="562" alt="image" src="https://github.com/user-attachments/assets/cded2264-847e-4c4f-8d21-c15c01732d5c" />
+# Zapret Windows Türkiye
 
-# Zapret Windows Türkiye / (Zapret2)
+Türk kullanıcılar için DPI (Deep Packet Inspection / Derin Paket İncelemesi) tabanlı internet sansürlerini ve kısıtlamalarını atlatmak amacıyla [zapret-win-bundle](https://github.com/bol-van/zapret-win-bundle) projesinin kullanımını kolaylaştıran bir AutoIt arayüzüdür.
 
-Bu programın amacı, Türk kullanıcılar için DPI (Deep Packet Inspection / Derin Paket İncelemesi) tabanlı internet sansürlerini ve kısıtlamalarını atlatmak amacıyla geliştirilmiş olan [zapret-win-bundle](https://github.com/bol-van/zapret-win-bundle) projesinin kullanımını kolaylaştırmaktır.
+## Ne yapıldı? (Düzenlemeler)
 
-## Programın Özellikleri
+Bu depodaki orijinal kodu inceledik ve bazı sitelere erişimi engelleyen hataları giderdik:
 
-- **DNS Kontrolü:** ISS tarafından DNS'inize müdahale ediliyorsa tespiti yapılır. DNS'i sağlama almak için YogaDNS kurmanızı ve Google DoH ayarlamanızı öneririm.
-- **Dnscrypt-proxy servisi:** YogaDNS kullanmanızı daha çok tavsiye etsem de Dnscrypt-proxy kullanarak da şifreli DNS servisi kullanabilirsiniz. Her şey tek programda olsun diyenler tercih edebilir. 
-- **Blockcheck:** ISS'niz için çalışan stratejiyi bulmak için blockcheck yapabilirsiniz.
-- **Hazır Stratejiler:** Bulabildiğim bazı hazır stratejileri programa ekledim, blockcheck yapmaya gerek kalmadan deneyebilirsiniz.
-- **Çoklu Motor Desteği (Multi-Engine):** Hem eski klasik Zapret motorunu hem de yeni nesil LUA tabanlı gelişmiş Zapret2 motorunu entegre olarak barındırır.
-- **Manuel Kullanım:** "Zapret'i Başlat" seçeneği ile program içinden anlık kullanım sağlar. Program kapatıldığında tüm süreçler temizlenir.
-- **Servis Desteği:** "Servis Olarak Yükle" butonu ile Windows Servisi olarak kurma imkanı sunar. Bilgisayar her açıldığında otomatik başlar. Bu programın açılmasına gerek kalmaz.
-- **Hostlist Desteği:** Sadece sansürlü siteleri listeye ekleyerek (otomatik veya manuel) filtreleme yapar; normal internet trafiğinizi kesinlikle yormaz.
-- **Excludelist Desteği:** Zapret'in aktif olmasını istemediğiniz domain'leri excludelist.txt dosyasına yazabilirsiniz. Varsayılan olarak com.tr ve gov.tr uzantılı siteler eklenmiştir.
-- **Ağdaki Cihazlarla Paylaş:** `go-pcap2socks` entegrasyonu sayesinde, bilgisayarınızda çalışan Zapret motorunu yerel ağdaki diğer cihazlarınızla (PlayStation, Xbox, Nintendo Switch, Akıllı TV vb.) paylaşmanızı sağlar. Konsollarda Discord ve Roblox gibi erişim engellerini aşmanın en kararlı yoludur.
+### 1. DNS-over-HTTPS "fallback" sorunu (en önemli düzeltme)
+Program sistem DNS'ini Cloudflare (1.1.1.1) yaparken DNS-over-HTTPS (DoH) sunucularını `AllowFallbackToUdp = $false` ile ayarlıyordu. ISS DoH trafiğini engellediğinde DNS sorunsuzca çalışmıyordu ve bazı siteler açılmıyordu.
 
-## ⚠️ OOB ve Syndata Stratejileri Hakkında Önemli Not
+**Düzeltme:** `AllowFallbackToUdp` değeri `$true` yapıldı. Artık DoH engellendiğinde sistem normal UDP DNS'e düşüyor, site erişimleri geri geliyor.
 
-OOB ve Syndata stratejileri, uygulama tarafından da belirtildiği üzere hostname tabanlı filtreleme seçenekleriyle uyumlu çalışmamaktadır.
+### 2. DNS "zehirlenme" tespiti çok sıcaktı
+`CheckDnsPoisoningSilent()` fonksiyonu, tanınmayan bir DNS yanıtı geldiği anı otomatik olarak "DNS zehirlenmesi" olarak işaretleyip (`Return True`) butonları kilitliyordu. Bu da geçerli DNS ayarlarıyla bile programı çalıştıramamaya sebep oluyordu.
 
-Aşağıdaki parametreler bu stratejilerle birlikte kullanıldığında stratejiler maalesef çalışmaz:
+**Düzeltme:** Tanınmayan/beyaz-liste dışındaki yanıtlar artık otomatik zehirlenme sayılmıyor (`Return False`). Sadece bilinen TT zehirlenme IP'si (`195.175.254.2`) tespit edildiğinde uyarı veriliyor.
 
-- `--hostlist`
-- `--hostlist-auto`
-- `--hostlist-domains`
-- `--hostlist-exclude`
-- `--hostlist-exclude-domains`
+### 3. Blockcheck2 `.bak` yedekleme kilidi
+Özel test domeni ayarı yapıldığında `blockcheck2.sh` yedekleniyordu; eskiden bir `.bak` dosyası kalıyorsa işlem tamamen durduruluyordu ve tekrar analiz yapılamıyordu.
 
-**Peki, bu stratejileri filtre kullanarak çalıştırmak istiyorsanız ne yapmalısınız?**
+**Düzeltme:** Eski `.bak` dosyası otomatik siliniyor ve analiz akışı normal şekilde devam ediyor.
 
-Hostname (alan adı) yerine IP adresi üzerinden filtreleme yapmanız gerekir.
+## Özellikler
 
-Örneğin Discord ve Roblox için:
+- **Çift motor:** Eski klasik Zapret (winws.exe) ve yeni LUA tabanlı Zapret2 (winws2.exe) desteği.
+- **Blockcheck (ISS Analizi):** Hangi stratejinin çalıştığını otomatik olarak bulur.
+- **Hazır strateji profilleri:** Turk Telekom, Superonline, Vodafone, Turksat Kablonet, Turkcell/Vodafone/Telekom Mobil gibi operatörlere özel hazır stratejiler.
+- **Hostlist / Excludelist:** Sadece sansürlü siteleri filtreleyebilir; `com.tr`, `gov.tr`, `google.com`, `googleapis.com` varsayılan olarak dışarı tutulur.
+- **DNSCrypt-proxy:** Şifreli DNS servisi kurma / kaldırma desteği.
+- **Windows Servisi:** Bilgisayar açıldığında otomatik başlayan servis olarak kurulum.
+- **Ağ paylaşımı:** Yerel ağdaki konsol (PlayStation, Xbox, Switch) ve akıllı TV ile paylaşım (go-pcap2socks veya V2Ray + MaraDNS).
+- **Güncelleme kontrolü:** GitHub'dan yeni sürüm kontrolü.
 
-1. İlgili strateji dosyasını (`strategy2.txt`) açın.
-2. Dosyanın sonuna aşağıdaki parametreyi ekleyin:
+## Kurulum
 
-   ```text
-   --ipset-ip=128.116.0.0/16,2.20.245.0/24,23.194.190.0/24,65.9.130.0/24,104.18.2.0/23,162.159.128.0/20,34.126.226.51/32
-   ```
+1. ZIP dosyasını **indirip bir klasöre çıkarın** (ZIP'in içinden doğrudan çalıştırmayın).
+2. `zapret-win-turkey.au3` dosyasını AutoIt3 ile derleyin veya hazır `.exe`'yi kullanın.
+3. Programı yönetici yetkisiyle çalıştırın.
+4. İlk açılışta DNS zehirlenmesi tespit edilirseCloudflare DNS'yi ayarlamak için "Evet" deyin (veya YogaDNS / DNSCrypt-proxy kullanın).
+5. "ISS Analizi (Blockcheck) Yap" düğmesiyle çalışan stratejiyi bulun veya hazır bir profil seçin.
+6. "ZAPRET'İ BAŞLAT" düğmesiyle bağlantıyı açın.
 
-**Önemli uyarılar:**
+## Sitelere giremiyorsanız (sorun giderme)
 
-- Bu IP aralıkları Discord ve Roblox dışında başka servisler tarafından da kullanılıyor olabilir. Dolayısıyla bu filtreleme, yalnızca söz konusu iki servisi etkilemekle sınırlı kalmayabilir.
-- IP adresleri ve IP aralıkları zaman içerisinde değişebilir. Kullandığınız IP listesini güncel tutmak sizin sorumluluğunuzdadır.
+- Programı **ZIP'in içinden doğrudan çalıştırmayın**, önce klasöre çıkarın.
+- DNS zehirlenmesi tespit edilirse Cloudflare DNS'yi kabul edin; yoksa YogaDNS + Google DoH ayarlayın.
+- OOB/Syndata stratejileri hostlist filtresiyle çalışmaz; bu stratejiler sistem genelinde etkilidir.
+- `goodbyedpi.exe` çalışıyorsa önce kapatın (çakışma uyarısı çıkar).
+- Anti-Cheat yazılımları (Fortnite vb.) Zapret'i kapatabilir; bu durumda bilgisayarı yeniden başlatın.
 
-## Yerel Ağ Paylaşımı (Konsol / Diğer Cihazlar)
+## Teşekkür
 
-**Ağdaki Cihazlarla Paylaş** özelliği, bilgisayarınızda çalışan Zapret yapılandırmasını PlayStation, Xbox ve Roblox gibi hizmetleri kullanan diğer cihazlarda kullanmanızı sağlar. Özellik iki farklı yöntem sunar: **go-pcap2socks** ve **V2Ray + MaraDNS**.
-
-Yöntem seçimi, bilgisayarın ağa nasıl bağlandığına ve hangi uygulamaların kullanılacağına göre değişebilir.
-
-> [!CAUTION]
-> Wi-Fi üzerinden paylaşım yapıldığında özellikle go-pcap2socks yönteminde belirgin hız düşüşü yaşanabilir. Performans sorunu yaşıyorsanız bilgisayarı modem/router'a Ethernet kablosuyla bağlamanız önerilir.
-
-### Yöntem 1: go-pcap2socks
-
-Bu yöntem, ağdaki cihazların trafiğini go-pcap2socks aracılığıyla bilgisayar üzerinden aktarır.
-
-#### Gereksinimler ve kurulum
-
-- Bilgisayarda **[Npcap](https://npcap.com/)** sürücüsünün kurulu olması gerekir.
-- Bilgisayar ve paylaşım yapılacak cihaz aynı yerel ağa bağlı olmalıdır.
-- Program içerisinden **Ağdaki Cihazlarla Paylaş** özelliğini açıp go-pcap2socks yöntemini seçin.
-- Gerekli izinleri onaylayın ve paylaşımın başlamasını bekleyin.
-
-Paylaşım için ağdaki diğer cihazın ağ ayarlarını manuel olarak yapılandırın:
-
-- **IP Adresi:** `172.24.2.10` ile `172.24.2.255` arasında kullanılmayan bir adres. Örnek: `172.24.2.50`
-- **Alt Ağ Maskesi:** `255.255.0.0`
-- **Varsayılan Ağ Geçidi:** `172.24.2.1`
-- **Birincil DNS:** `1.1.1.1`
-- **İkincil DNS:** `8.8.8.8`
-
-Bu IP ayarları go-pcap2socks yöntemine aittir. Aynı IP adresini başka bir cihazda kullanmayın.
-
-#### Avantajları
-
-- Discord gibi ek uygulamaları oyunla birlikte kullanmak isteyenler için uygun bir seçenektir.
-- NAT ve trafik aktarımı uyumluluğu açısından V2Ray + MaraDNS yöntemine göre avantaj sağlayabilir.
-- Ağ trafiğinin daha kapsamlı aktarılmasının gerektiği durumlarda tercih edilebilir.
-
-#### Dezavantajları
-
-- **Npcap** kurulumu gerektirir.
-- Wi-Fi üzerinden kullanıldığında belirgin hız kaybı yaşanabilir.
-
-### Yöntem 2: V2Ray + MaraDNS
-
-Bu yöntem, V2Ray ve MaraDNS bileşenlerini kullanarak DNS yönlendirmesi üzerinden çalışır. Gerekli yapılandırma program tarafından gerçekleştirilir.
-
-#### Kurulum ve yapılandırma
-
-1. Program içerisinden **Ağdaki Cihazlarla Paylaş** özelliğini açıp V2Ray + MaraDNS yöntemini seçin.
-2. Gerekli bileşenlerin başlatılmasını bekleyin.
-3. Windows Güvenlik Duvarı izin isteği gösterirse gerekli izni onaylayın.
-4. Programın gösterdiği mesaj kutusundaki IP adresini not alın.
-5. Ağdaki diğer cihazın DNS ayarlarında, programın gösterdiği IP adresini kullanın.
-
-#### Avantajları
-
-- **Npcap gerektirmez.**
-- Wi-Fi üzerinden kullanım için pratik bir alternatiftir.
-- Yalnızca belirli bir oyunu veya hizmeti kullanıp işiniz bittiğinde paylaşımı kapatmak istiyorsanız uygundur.
-- Ağ yapılandırmasını elle düzenleme ihtiyacını azaltır.
-
-#### Dezavantajları
-
-- Bazı uygulamalar ve çevrim içi hizmetler düzgün çalışmayabilir.
-- NAT davranışı olumsuz etkilenebilir. Bu durum çevrim içi oyunlarda bağlantı veya eşleştirme sorunlarına neden olabilir.
-
-### Hangi yöntemi seçmeliyim?
-
-**Senaryo 1 — Oyun oynarken Discord da kullanmak istiyorum.**
-
-Bilgisayarınızı Ethernet kablosuyla modem/router'a bağlayabiliyorsanız **go-pcap2socks** yöntemini tercih edin. Oyun ve Discord gibi ek uygulamaları birlikte kullanmak için daha uygun bir seçenek olabilir.
-
-**Senaryo 2 — Yalnızca Roblox oynayacağım, işim bitince paylaşımı kapatacağım ve bilgisayarımı Wi-Fi üzerinden kullanıyorum.**
-
-Bu durumda **V2Ray + MaraDNS** yöntemini tercih edebilirsiniz. Npcap gerektirmez ve Wi-Fi üzerinden kullanım için pratik bir alternatiftir.
-
-### Yöntemlerin karşılaştırması
-
-| Özellik | go-pcap2socks | V2Ray + MaraDNS |
-|---|---|---|
-| Npcap gereksinimi | Gerekli | Gerekli değil |
-| Wi-Fi performansı | Hız düşüşü yaşanabilir | Hız düşüşü beklenmez |
-| Discord ve oyun birlikte | Tercih edilebilir | Bazı hizmetlerde sorun yaşanabilir |
-| NAT uyumluluğu | NAT sorunu beklenmez | NAT sorunları yaşanabilir |
-| Ek yapılandırma | Manuel IP ve DNS girişi | Manuel DNS girişi |
-
-**Not:** Her iki yöntemde de paylaşım bilgisayar üzerinden yapıldığı için bilgisayar açık kalmalıdır. Performans ve uyumluluk, ağ yapılandırmasına ve kullanılan hizmetlere göre değişebilir.
-
-
-## Çakışma Önleme
-
-Program, arka planda çalışabilecek diğer DPI atlatma araçlarıyla (`GoodbyeDPI` vb.) veya eski `WinDivert` sürücü kalıntılarıyla çakışmaları otomatik olarak tespit eder, temizler ve güvenli bir açılış sağlar.
-
-## Teşekkürler
-
-- **Zapret** projesinin ana motoru için [@bol-van](https://github.com/bol-van)'a,
-- Otomatik blockcheck mantığı ve ilhamı için [splitwire-turkey](https://github.com/cagritaskn/splitwire-turkey) geliştiricisi [@cagritaskn](https://github.com/cagritaskn)'a,
-- [go-pcap2socks](https://github.com/DaniilSokolyuk/go-pcap2socks) projesinin geliştiricisi [@DaniilSokolyuk](https://github.com/DaniilSokolyuk)'a,
-- [dnscrypt-proxy](https://github.com/dnscrypt/dnscrypt-proxy) projesinin geliştiricisi [@jedisct1](https://github.com/jedisct1)'e,
-- [V2Ray + MaraDNS yöntemi](https://ntc.party/t/%D0%BE%D0%B1%D1%85%D0%BE%D0%B4-%D0%B1%D0%BB%D0%BE%D0%BA%D0%B8%D1%80%D0%BE%D0%B2%D0%BA%D0%B8-youtube-%D0%B4%D0%BB%D1%8F-%D0%BB%D1%8E%D0%B1%D1%8B%D1%85-smart-tv-%D1%81-goodbyedpi-v2ray-maradns/9415) için [@valdikss](https://github.com/valdikss)'e teşekkürler.
+- [@bol-van](https://github.com/bol-van) – Zapret ana motoru
+- [@cagritaskn](https://github.com/cagritaskn) – Blockcheck otomatik analiz ilhamı
+- [@DaniilSokolyuk](https://github.com/DaniilSokolyuk) – go-pcap2socks
+- [@jedisct1](https://github.com/jedisct1) – dnscrypt-proxy
